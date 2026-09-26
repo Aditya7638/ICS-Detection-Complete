@@ -1,212 +1,511 @@
-<div align="center">
+# ICS Detection System
 
-# ICS Detection & Monitoring
+A machine-learning and rule-based intrusion detection system for Industrial Control Systems (ICS). The system combines a trained Random Forest classifier with process-aware security rules and a fusion layer to detect potentially malicious or anomalous industrial process activity.
 
-An experimental ICS/SCADA security monitoring platform that classifies sensor readings with a Random Forest model and process rules, then presents detections, alarms, and investigation context in a live dashboard.
+The project provides a FastAPI backend for inference and a frontend interface for interacting with the detection system.
 
-[Features](#features) · [Quick Start](#quick-start) · [Configuration](#configuration) · [API](#api-overview) · [Safety](#safety-and-limitations)
+## Features
 
-</div>
+* Machine-learning-based ICS attack detection
+* Random Forest classification model
+* Process-aware rule engine
+* ML + rule-based decision fusion
+* Configurable fusion strategy and detection threshold
+* Feature-based inference using industrial process data
+* FastAPI backend
+* Frontend interface
+* Structured request validation using Pydantic
+* Model and configuration separation
+* Detection results with ML/rule evidence
+* Configurable security rules
+* Support for future company-specific detector customization
 
-> **Important:** This is a research/demo system, not a safety system or a certified industrial intrusion detection product. It does not connect to or control PLCs or plant equipment.
-
-## What It Does
-
-- Accepts sensor rows and CSV datasets for inference.
-- Validates expected sensor fields and computes temporal features for the included classifier.
-- Combines model output with the configured process-rule engine and labels results `Normal`, `Suspicious`, or `Attack`.
-- Persists user-scoped detections and related alarms; streams live simulator events over WebSocket.
-- Provides dashboard, live monitor, alarm center, analytics, and an optional AI chat assistant.
-- Replays the configured CSV repeatedly until stopped. Replay is simulated data, not a live plant connection.
-
-## Detection Flow
-
-```text
-Sensor row / CSV
-      |
-      v
-Validation -> temporal features -> Random Forest probability
-                                      |
-                         process-rule engine
-                                      |
-                                      v
-                               fusion result
-                                      |
-               Normal / Suspicious / Attack + alarm
-                                      |
-                        database + dashboard / WS
-```
-
-The bundled model expects 168 features: 42 raw sensor values and three derived features per sensor (`roll_mean5`, `roll_std5`, and `diff5`). Batch processing and simulator replay carry recent row history into inference. The model classifies provided readings; it does not predict future plant states. The fusion threshold and active rules are defined in the repository configuration and rule implementation.
-
-## Tech Stack
-
-- **Backend:** Python, FastAPI, SQLAlchemy, Pydantic, pandas, scikit-learn, JWT
-- **Database:** PostgreSQL by default; SQLite can be used for local development
-- **Frontend:** React, TypeScript, Vite, Tailwind CSS, Recharts
-- **Optional AI:** Groq or OpenAI API, configured with an API key
-
-## Repository Layout
+## System Architecture
 
 ```text
-backend/
-  app/                  FastAPI routes, auth, database, detection and services
-  ml_models/            Pre-trained classifier
-  config/               Fusion configuration
-  rules/                Active and candidate detection rules
-  requirements.txt
-  .env.example
-frontend/
-  src/                  React pages, components, hooks and API client
-data/
-  ne_data.csv           Default simulator dataset
+                    ICS Sensor / Process Data
+                              │
+                              ▼
+                    ┌──────────────────┐
+                    │  Feature Input   │
+                    │   & Validation   │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                    ┌──────────────────┐
+                    │ Feature Processing│
+                    └────────┬─────────┘
+                             │
+                  ┌──────────┴──────────┐
+                  │                     │
+                  ▼                     ▼
+        ┌──────────────────┐   ┌──────────────────┐
+        │ Random Forest    │   │   Rule Engine    │
+        │   Classifier     │   │ Process-Aware    │
+        └────────┬─────────┘   └────────┬─────────┘
+                 │                      │
+                 │ ML Evidence          │ Rule Evidence
+                 └──────────┬───────────┘
+                            ▼
+                    ┌──────────────────┐
+                    │  Fusion Engine   │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                    ┌──────────────────┐
+                    │ Detection Result │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                       FastAPI API
+                             │
+                             ▼
+                         Frontend
 ```
 
-## Quick Start
+## Project Structure
 
-### Requirements
+The exact structure can vary as the project evolves, but the main components are organized around the backend, frontend, model artifacts, rules, and configuration.
 
-- Python 3.11 or newer
-- Node.js and npm
-- PostgreSQL, or SQLite for local development
-
-Open two PowerShell terminals from the repository root.
-
-### 1. Configure the backend
-
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-Copy-Item .env.example .env
+```text
+ICS-Detection/
+│
+├── backend/
+│   ├── ...
+│   ├── .venv/
+│   └── ...
+│
+├── frontend/
+│   ├── ...
+│   └── ...
+│
+├── best_model.joblib
+├── fusion_config.json
+├── rule_engine_final.py
+├── candidate_rules.py
+├── NewTestData.csv
+├── .gitignore
+└── README.md
 ```
 
-Edit `backend/.env` before starting the app. Set a private, random `JWT_SECRET` and a valid database URL. The example uses PostgreSQL; for a local SQLite database, set:
+> `.venv`, `.env`, dependencies, build output, and other local/generated files should not be committed to the repository.
 
-```env
-DATABASE_URL=sqlite:///./ics_dev.db
+## Core Components
+
+### 1. Random Forest Model
+
+The trained Random Forest model is used as the primary machine-learning-based detector.
+
+The model receives the required processed feature vector and produces the ML prediction/probability used by the detection pipeline.
+
+Model artifact:
+
+```text
+best_model.joblib
 ```
 
-The app creates tables at startup for development. Alembic configuration is included for database migrations; use migrations as part of a production deployment process.
+The model should always be used together with the feature-processing logic and feature schema with which it was trained.
 
-Start the API from the `backend` directory:
+### 2. Rule Engine
 
-```powershell
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+The rule engine provides process-aware detection logic in addition to the machine-learning model.
+
+Important rule files include:
+
+```text
+rule_engine_final.py
+candidate_rules.py
 ```
 
-Interactive API documentation: <http://127.0.0.1:8000/docs>
+Rules can represent domain/process constraints that may not be captured completely by the statistical model.
 
-### 2. Start the frontend
+This allows the system to use both:
 
-In a second terminal, from the repository root:
+* Data-driven ML evidence
+* Process/domain-driven rule evidence
 
-```powershell
-cd frontend
-npm install
-Copy-Item .env.example .env
-npm run dev
+### 3. Fusion Layer
+
+The fusion layer combines the ML prediction and rule-engine result.
+
+Configuration is stored separately so that detection behavior can be adjusted without modifying the trained model itself.
+
+Example configuration file:
+
+```text
+fusion_config.json
 ```
 
-Open <http://localhost:5173>. Vite proxies `/api` requests to the backend on port `8000` by default.
+Depending on the configured strategy, the final decision can consider:
 
-Register an account through the app, then sign in. Do not use real operational credentials or secrets in a development environment.
+```text
+ML prediction
++
+Rule-engine evidence
++
+Configured weights/thresholds
+```
+
+### 4. FastAPI Backend
+
+The backend exposes the detection functionality through APIs.
+
+The backend is responsible for:
+
+1. Receiving input data
+2. Validating the request
+3. Processing the input features
+4. Loading the trained model
+5. Running ML inference
+6. Executing the rule engine
+7. Performing ML/rule fusion
+8. Returning the final detection result
+
+### 5. Frontend
+
+The frontend provides the user interface for interacting with the detection system.
+
+It communicates with the FastAPI backend and presents detection results to the user.
+
+## Dataset
+
+The project uses industrial process/sensor data containing the features required by the trained detection model.
+
+An example test dataset is:
+
+```text
+NewTestData.csv
+```
+
+The model expects the same feature schema used during training.
+
+**Important:** Changing the feature schema, adding new features, removing features, or changing feature engineering may require retraining the model.
+
+## Detection Pipeline
+
+The complete inference process is approximately:
+
+```text
+Input sensor/process data
+        │
+        ▼
+Request validation
+        │
+        ▼
+Feature processing
+        │
+        ├───────────────┐
+        ▼               ▼
+ Random Forest      Rule Engine
+        │               │
+        ▼               ▼
+  ML prediction     Rule result
+        │               │
+        └───────┬───────┘
+                ▼
+           Fusion Layer
+                │
+                ▼
+       Final Detection Result
+```
 
 ## Configuration
 
-Backend settings are loaded from `backend/.env` when Uvicorn is started from the `backend` directory.
+Detection behavior that does not require changing the trained model can be controlled through configuration.
 
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | SQLAlchemy database connection URL |
-| `JWT_SECRET` | Secret used to sign authentication tokens; replace the example value |
-| `JWT_EXPIRE_MINUTES` | Token lifetime in minutes |
-| `MODEL_PATH` | Model path relative to `backend/` |
-| `FUSION_CONFIG_PATH` | Fusion configuration path relative to `backend/` |
-| `SIMULATOR_DATASET` | CSV path used by the replay simulator; defaults to `data/ne_data.csv` |
-| `LLM_PROVIDER` | `groq` or `openai` |
-| `LLM_API_KEY` | Optional provider API key; keep it private and out of Git |
-| `LLM_MODEL` | Model name sent to the selected provider |
-| `CORS_ORIGINS` | Comma-separated allowed frontend origins |
+Typical configurable parameters include:
 
-Frontend settings are in `frontend/.env.example`. `VITE_API_BASE_URL` defaults to `/api/v1`; the Vite development proxy targets `http://127.0.0.1:8000`.
+* ML decision threshold
+* ML/rule weighting
+* Fusion strategy
+* Rule activation
+* Rule priority/severity
 
-## Using the Simulator
+For example, increasing the ML decision threshold can reduce the number of positive detections at the cost of potentially missing some attacks.
 
-The default dataset is `data/ne_data.csv`, included in this repository. Start, pause/resume, and stop replay from the **Live Monitor**. Replay cycles through the CSV until stopped and sends each row through the detection pipeline. It is explicitly demo/replay mode and does not represent a real-time plant sensor connection.
+Configuration changes should always be evaluated on validation data before being used in production.
 
-The Live Monitor also lets you filter and select persisted detections individually or in groups for deletion. Deletion is permanent and removes associated alarms; only records belonging to the signed-in user are eligible. CSV rows displayed only as upload previews are not persisted selectors.
+## Model Adaptation
 
-## API Overview
+The project is designed so that future customization can be implemented without changing the core FastAPI application.
 
-All REST endpoints use the `/api/v1` prefix and require a bearer token unless noted. The full schema is available at `/docs`.
+There are three broad levels of adaptation.
 
-| Method | Endpoint | Purpose |
-|---|---|---|
-| `POST` | `/auth/register` | Create an account |
-| `POST` | `/auth/login` | Obtain a JWT |
-| `GET` | `/auth/me` | Current account |
-| `GET` | `/health` | Health status |
-| `GET` | `/system/model-info` | Model metadata |
-| `POST` | `/inference/row` | Classify one sensor row; optional `history` array of up to five preceding rows |
-| `POST` | `/inference/csv` | Analyze a CSV upload |
-| `POST` | `/inference/csv/stream` | Analyze CSV and return newline-delimited result batches |
-| `GET` | `/monitoring/latest` | Latest persisted detections |
-| `GET` | `/monitoring/history` | Paginated detection history |
-| `DELETE` | `/monitoring/history` | Delete selected detection IDs and linked alarms |
-| `GET` | `/alarms` | List alarms, optionally filtered by severity or status |
-| `POST` | `/alarms/{id}/acknowledge` | Acknowledge an alarm |
-| `POST` | `/alarms/{id}/resolve` | Resolve or mark as false positive |
-| `GET` | `/analytics/overview` | Detection and alarm summary |
-| `GET` | `/analytics/recent` | Recent predictions |
-| `POST` | `/chat` | Chat or request detection analysis |
-| `POST` | `/simulator/start` | Start dataset replay |
-| `POST` | `/simulator/pause` | Toggle pause/resume |
-| `POST` | `/simulator/stop` | Stop replay |
-| `GET` | `/simulator/status` | Replay status |
-| `WS` | `/ws/monitor` | Live detection stream |
+### Level 1 — Configuration Adaptation
 
-Example row request (include all required sensor fields for the configured model):
+These generally do not require model retraining:
 
-```json
-{
-  "FIT101": 0.0,
-  "history": []
-}
+```text
+Detection threshold
+ML/rule weights
+Fusion strategy
+Rule priority
+Rule activation
+Operational sensor criticality
 ```
 
-The example is illustrative only; the validator requires the complete set of expected sensor columns. Check the model metadata and `/docs` for request schemas.
+### Level 2 — Feature Adaptation
 
-## Optional AI Assistant
+Changes such as:
 
-The assistant can respond to general conversation or analyze supplied detection context. For provider-backed replies, set `LLM_PROVIDER`, `LLM_API_KEY`, and `LLM_MODEL` in `backend/.env`. Without a key, the API uses a limited fallback response.
+```text
+Adding sensors
+Removing features
+Changing feature engineering
+Changing preprocessing
+Changing the feature schema
+```
 
-AI output is advisory, may be inaccurate, and must be checked against approved incident-response procedures. Do not provide the assistant with secrets, sensitive plant details, or data that you are not authorized to share with the configured provider.
+can require retraining because the trained model expects a specific feature representation.
 
-## Development Checks
+### Level 3 — Model Adaptation
 
-From the repository root:
+Retraining is appropriate when:
+
+```text
+New training data becomes available
+A new attack class is introduced
+The industrial process is substantially different
+The feature schema changes
+Significant distribution/concept drift occurs
+```
+
+The system should not modify the internal feature importance of a trained Random Forest as a substitute for retraining.
+
+## Future Requirement-Driven Customization
+
+A planned extension of the system is a requirement-driven customization framework.
+
+A company could provide requirements such as:
+
+```text
+- Keep false positives below 1%
+- Maintain recall above 90%
+- LIT101 is a critical sensor
+- Prioritize sensor manipulation attacks
+- Detection latency should remain below 20 ms
+```
+
+These requirements can be converted into a structured configuration:
+
+```text
+Natural-language requirements
+            │
+            ▼
+     Requirement Parser
+            │
+            ▼
+   Structured Requirements
+            │
+            ▼
+  Requirement Validation
+            │
+       ┌────┴────┐
+       ▼         ▼
+  Configuration  Retraining
+   Optimizer     Required
+       │
+       ▼
+  Validated Company Profile
+```
+
+The optimizer can search over parameters such as:
+
+* Detection threshold
+* ML weight
+* Rule weight
+* Fusion strategy
+* Rule priorities
+* Operational sensor criticality
+
+Hard requirements such as maximum FPR, minimum recall, or maximum latency should be treated as constraints.
+
+If no configuration satisfies all hard constraints, the system should report the requirement as infeasible rather than producing an invalid configuration.
+
+## Important Design Principle
+
+The natural-language component should **not directly modify backend code or security logic**.
+
+Instead:
+
+```text
+Natural Language
+       ↓
+Structured Requirements
+       ↓
+Validator
+       ↓
+Deterministic Optimizer
+       ↓
+Validated Configuration
+       ↓
+Detection System
+```
+
+This keeps the security-critical decision process deterministic, testable, and reproducible.
+
+## Installation
+
+### Backend
+
+Open PowerShell and navigate to the project:
 
 ```powershell
-Push-Location backend
-.\.venv\Scripts\python.exe -m compileall app
-Pop-Location
-
-Push-Location frontend
-npm run build
-Pop-Location
+cd D:\ics_full_project\ICS-Detection
 ```
 
-## Safety and Limitations
+Create/activate the backend virtual environment if required:
 
-- This software is for research and demonstration. It is not validated or certified for operational decisions.
-- Classifications and rules can produce false positives and false negatives. Do not treat a model probability as proof of an attack.
-- Dataset replay and offline CSV inference are not live plant monitoring.
-- The assistant cannot replace authorized operators, formal incident response, or independent verification.
-- Never use this application to issue PLC commands, change actuator states, suppress alarms, or control industrial processes.
-- Keep `.env` files and API keys private. If a key is committed or shared, revoke it at the provider and replace it.
-4. WebSocket authentication uses a query param token (`?token=...`). For production, use a proper WSS connection with header-based auth.
-#   I C S - D e t e c t i o n 
- 
- 
+```powershell
+cd backend
+```
+
+If the project uses the existing `uv` environment:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Install the backend dependencies according to the project's dependency file.
+
+Then start the FastAPI backend using the project's configured startup command.
+
+For a standard FastAPI setup, this may be:
+
+```powershell
+uvicorn main:app --reload
+```
+
+> Use the actual entry-point/module configured in the backend if it differs from `main.py`.
+
+### Frontend
+
+Open another PowerShell terminal:
+
+```powershell
+cd D:\ics_full_project\ICS-Detection\frontend
+```
+
+Install dependencies:
+
+```powershell
+npm install
+```
+
+Start the development server:
+
+```powershell
+npm run dev
+```
+
+The Vite development server will display the local frontend URL in the terminal.
+
+## Environment Variables
+
+Environment-specific secrets should be stored in `.env`.
+
+Example:
+
+```env
+# Example only
+DATABASE_URL=your_database_url
+API_KEY=your_api_key
+```
+
+Do **not** commit `.env` to GitHub.
+
+The repository's `.gitignore` should contain:
+
+```gitignore
+.env
+```
+
+A safe practice is to provide a `.env.example` containing variable names but not real credentials.
+
+## Git Workflow
+
+After making changes:
+
+```powershell
+git status
+git add .
+git commit -m "Describe your changes"
+git push
+```
+
+Before committing, verify that sensitive files such as `.env` are not staged:
+
+```powershell
+git status
+```
+
+## Validation and Evaluation
+
+The detector should be evaluated using data that was not used to tune the configuration.
+
+Important metrics include:
+
+* Accuracy
+* Precision
+* Recall
+* F1-score
+* False Positive Rate (FPR)
+* False Negative Rate (FNR)
+* Detection latency
+
+For configuration optimization, the validation data should be used for selecting thresholds and fusion parameters.
+
+The final test set should remain isolated for unbiased evaluation.
+
+## Security Considerations
+
+Because this system is intended for ICS/industrial-process security:
+
+* Model artifacts should be versioned.
+* Feature schemas should be versioned.
+* Rule configurations should be versioned.
+* Company-specific configurations should be validated before deployment.
+* Secrets must not be committed to source control.
+* Configuration changes should be tested before production deployment.
+* An optimizer should never claim to satisfy requirements that its validation results do not support.
+* Changes to the trained feature representation should trigger appropriate model validation/retraining.
+
+## Current Scope
+
+The current system focuses on combining:
+
+```text
+Machine Learning
+        +
+Process-Aware Rules
+        +
+Decision Fusion
+        +
+FastAPI Inference
+        +
+Frontend Interface
+```
+
+The requirement-driven adaptation and automated customization layer is intended as an extension of the existing detection framework.
+
+## Future Work
+
+Potential extensions include:
+
+* Requirement-driven detector customization
+* Natural-language requirement conversion
+* Automated configuration optimization
+* Company-specific detector profiles
+* Sensor criticality modeling
+* Attack-specific prioritization
+* Model retraining pipeline
+* Feature-selection experiments
+* Temporal/generalization evaluation
+* Drift detection
+* Model and configuration versioning
+* Explainable detection results
+* Automated requirement-satisfaction evaluation
+
+## Disclaimer
+
+This project is a research/development system for ICS intrusion detection. Detection results should be validated against the target industrial environment and operational requirements before being used in a production safety or security system.

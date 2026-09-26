@@ -1,303 +1,212 @@
-# ICS Anomaly Detection & Monitoring Platform
+<div align="center">
 
-A complete production-style ICS/SCADA cyberattack detection system based on the **SWaT (Secure Water Treatment)** dataset, using a trained RandomForest classifier fused with a 16-rule physical-process rule engine.
+# ICS Detection & Monitoring
 
----
+An experimental ICS/SCADA security monitoring platform that classifies sensor readings with a Random Forest model and process rules, then presents detections, alarms, and investigation context in a live dashboard.
 
-## Architecture
+[Features](#features) · [Quick Start](#quick-start) · [Configuration](#configuration) · [API](#api-overview) · [Safety](#safety-and-limitations)
 
+</div>
+
+> **Important:** This is a research/demo system, not a safety system or a certified industrial intrusion detection product. It does not connect to or control PLCs or plant equipment.
+
+## What It Does
+
+- Accepts sensor rows and CSV datasets for inference.
+- Validates expected sensor fields and computes temporal features for the included classifier.
+- Combines model output with the configured process-rule engine and labels results `Normal`, `Suspicious`, or `Attack`.
+- Persists user-scoped detections and related alarms; streams live simulator events over WebSocket.
+- Provides dashboard, live monitor, alarm center, analytics, and an optional AI chat assistant.
+- Replays the configured CSV repeatedly until stopped. Replay is simulated data, not a live plant connection.
+
+## Detection Flow
+
+```text
+Sensor row / CSV
+      |
+      v
+Validation -> temporal features -> Random Forest probability
+                                      |
+                         process-rule engine
+                                      |
+                                      v
+                               fusion result
+                                      |
+               Normal / Suspicious / Attack + alarm
+                                      |
+                        database + dashboard / WS
 ```
-ICS Data (CSV / API / WebSocket)
-         ↓
-  Validation Engine (42 raw sensor columns checked)
-         ↓
-  Feature Preparation (rolling mean/std/diff over window=5 → 168 features)
-         ↓
-  RandomForestClassifier (best_model.joblib, threshold=0.70)
-         ↓                    ↓
-  ML Probability         Rule Engine (16 validated rules)
-         ↓                    ↓
-         └──────── Fusion (OR logic) ──────────┘
-                        ↓
-            Final Label: Normal / Suspicious / Attack
-                        ↓
-               Alarm Engine (cooldown, severity)
-                        ↓
-           PostgreSQL + WebSocket broadcast
-                        ↓
-         React Dashboard (live feed, alarms, analytics)
-                        ↓
-                  AI Chatbot (advisory only)
-```
 
----
-
-## Artifact Inspection Results
-
-| Property | Value |
-|---|---|
-| Model type | RandomForestClassifier (sklearn 1.7.2) |
-| n_estimators | 200 |
-| Total features | **168** (42 raw + 126 rolling) |
-| Raw sensor columns | 42 (FIT101 … P602) |
-| Rolling features | roll_mean5, roll_std5, diff5 per column |
-| Classes | 0 = Normal, 1 = Attack |
-| No embedded scaler | Raw values → rolling features → model |
-| predict_proba() | ✅ Yes |
-| Decision threshold | **0.70** (from fusion_config.json) |
-| Fusion logic | **OR**: Attack if (ML ≥ 0.70) OR (any rule violation) |
-| Active rules | 16: R10, R11, R20b, R_NEW_01–06, 08–13, 15 |
-| Validated Precision | 98.6% |
-| Validated Recall | 91.6% |
-| Validated F1 | 95.0% |
-| False Positive Rate | 1.3% |
-
-### Candidate Rules (NOT active)
-`candidate_rules.py` contains 15 unvalidated rules (R_NEW_01–15). Only those also present in `rule_engine_final.py`'s `ACTIVE_RULES` list are used. R_NEW_07 and R_NEW_14 are excluded — they fired too frequently on normal data.
-
----
+The bundled model expects 168 features: 42 raw sensor values and three derived features per sensor (`roll_mean5`, `roll_std5`, and `diff5`). Batch processing and simulator replay carry recent row history into inference. The model classifies provided readings; it does not predict future plant states. The fusion threshold and active rules are defined in the repository configuration and rule implementation.
 
 ## Tech Stack
 
-**Backend:** Python 3.11 · FastAPI · Uvicorn · Pydantic v2 · SQLAlchemy · PostgreSQL · Alembic · scikit-learn · pandas · JWT  
-**Frontend:** React 18 · TypeScript · Vite · Tailwind CSS · Recharts · React Router · Axios  
-**ML:** RandomForestClassifier (pre-trained, no retraining) · rule_engine_final.py (unmodified) · fusion_config.json (authoritative)
+- **Backend:** Python, FastAPI, SQLAlchemy, Pydantic, pandas, scikit-learn, JWT
+- **Database:** PostgreSQL by default; SQLite can be used for local development
+- **Frontend:** React, TypeScript, Vite, Tailwind CSS, Recharts
+- **Optional AI:** Groq or OpenAI API, configured with an API key
 
----
+## Repository Layout
 
-## Project Structure
-
-```
-ICS-Detection/
-├── backend/
-│   ├── app/
-│   │   ├── api/routes/        auth, inference, alarms, analytics, monitoring, system, chat, simulator, ws
-│   │   ├── auth/              security.py (JWT, bcrypt, RBAC)
-│   │   ├── core/              config.py (pydantic-settings)
-│   │   ├── db/                models.py, session.py
-│   │   ├── detection/
-│   │   │   ├── model_engine.py      ← loads best_model.joblib, computes rolling features
-│   │   │   ├── rule_adapter.py      ← wraps rule_engine_final.py (no rewrite)
-│   │   │   ├── fusion_engine.py     ← implements fusion_config.json OR logic
-│   │   │   ├── detection_service.py ← single detect() used by ALL paths
-│   │   │   └── validator.py         ← validates all 42 raw columns
-│   │   ├── schemas/           schemas.py (Pydantic v2)
-│   │   ├── services/          alarm_service.py
-│   │   ├── websocket/         manager.py
-│   │   └── main.py
-│   ├── ml_models/best_model.joblib
-│   ├── config/fusion_config.json
-│   ├── rules/rule_engine_final.py, candidate_rules.py
-│   ├── requirements.txt
-│   ├── alembic.ini
-│   └── .env.example
-├── frontend/
-│   └── src/
-│       ├── pages/             Login, Dashboard, Live, Alarms, Analytics, ModelInfo, Chat
-│       ├── layouts/           AppLayout.tsx (sidebar nav)
-│       ├── hooks/             useAuth.tsx, useWebSocket.ts
-│       └── services/          api.ts (single API client)
-├── data/                      ← place NewTestData.csv here for simulator
-└── README.md
+```text
+backend/
+  app/                  FastAPI routes, auth, database, detection and services
+  ml_models/            Pre-trained classifier
+  config/               Fusion configuration
+  rules/                Active and candidate detection rules
+  requirements.txt
+  .env.example
+frontend/
+  src/                  React pages, components, hooks and API client
+data/
+  ne_data.csv           Default simulator dataset
 ```
 
----
+## Quick Start
 
-## Quick Start (Windows PowerShell)
+### Requirements
 
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- PostgreSQL (or use SQLite for dev: see `.env.example`)
+- Python 3.11 or newer
+- Node.js and npm
+- PostgreSQL, or SQLite for local development
 
-### Database Setup (PostgreSQL)
+Open two PowerShell terminals from the repository root.
+
+### 1. Configure the backend
+
 ```powershell
-psql -U postgres
-CREATE USER ics_user WITH PASSWORD 'password';
-CREATE DATABASE ics_detection OWNER ics_user;
-\q
-```
-
-### Backend
-```powershell
-cd ICS-Detection\backend
-
+cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-
-pip install -r requirements.txt
-
-# Copy and edit environment file
-copy .env.example .env
-# Edit .env: set DATABASE_URL, JWT_SECRET, and optionally LLM_API_KEY
-
-# Run database migrations (PostgreSQL)
-alembic upgrade head
-
-# Start backend (auto-creates tables on first run)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-Create an account from the registration page and choose its role. Passwords must be at least 9 characters and contain a special character.
+Edit `backend/.env` before starting the app. Set a private, random `JWT_SECRET` and a valid database URL. The example uses PostgreSQL; for a local SQLite database, set:
 
-### Frontend
-```powershell
-cd ICS-Detection\frontend
-npm install
-npm run dev
-```
-Open: http://localhost:5173
-
-### Swagger API Docs
-http://127.0.0.1:8000/docs
-
----
-
-## SQLite (No PostgreSQL — Dev Only)
-Edit `.env`:
 ```env
 DATABASE_URL=sqlite:///./ics_dev.db
 ```
-No `alembic upgrade head` needed — tables are auto-created on startup.
 
----
+The app creates tables at startup for development. Alembic configuration is included for database migrations; use migrations as part of a production deployment process.
 
-## CSV Simulator
-Place `NewTestData.csv` in `ICS-Detection/data/`.
+Start the API from the `backend` directory:
 
-In the Live Monitor page → Start Simulator (1x / 5x / 10x speed).
-
-Every row passes through the **actual** detection pipeline (model → rules → fusion).  
-Labeled as **⚠ REPLAY / DEMO MODE** in the UI.
-
-Or via API:
 ```powershell
-curl -X POST "http://localhost:8000/api/v1/simulator/start?speed=5" -H "Authorization: Bearer <token>"
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
----
+Interactive API documentation: <http://127.0.0.1:8000/docs>
 
-## API Endpoints
+### 2. Start the frontend
 
-| Method | Path | Description |
+In a second terminal, from the repository root:
+
+```powershell
+cd frontend
+npm install
+Copy-Item .env.example .env
+npm run dev
+```
+
+Open <http://localhost:5173>. Vite proxies `/api` requests to the backend on port `8000` by default.
+
+Register an account through the app, then sign in. Do not use real operational credentials or secrets in a development environment.
+
+## Configuration
+
+Backend settings are loaded from `backend/.env` when Uvicorn is started from the `backend` directory.
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | SQLAlchemy database connection URL |
+| `JWT_SECRET` | Secret used to sign authentication tokens; replace the example value |
+| `JWT_EXPIRE_MINUTES` | Token lifetime in minutes |
+| `MODEL_PATH` | Model path relative to `backend/` |
+| `FUSION_CONFIG_PATH` | Fusion configuration path relative to `backend/` |
+| `SIMULATOR_DATASET` | CSV path used by the replay simulator; defaults to `data/ne_data.csv` |
+| `LLM_PROVIDER` | `groq` or `openai` |
+| `LLM_API_KEY` | Optional provider API key; keep it private and out of Git |
+| `LLM_MODEL` | Model name sent to the selected provider |
+| `CORS_ORIGINS` | Comma-separated allowed frontend origins |
+
+Frontend settings are in `frontend/.env.example`. `VITE_API_BASE_URL` defaults to `/api/v1`; the Vite development proxy targets `http://127.0.0.1:8000`.
+
+## Using the Simulator
+
+The default dataset is `data/ne_data.csv`, included in this repository. Start, pause/resume, and stop replay from the **Live Monitor**. Replay cycles through the CSV until stopped and sends each row through the detection pipeline. It is explicitly demo/replay mode and does not represent a real-time plant sensor connection.
+
+The Live Monitor also lets you filter and select persisted detections individually or in groups for deletion. Deletion is permanent and removes associated alarms; only records belonging to the signed-in user are eligible. CSV rows displayed only as upload previews are not persisted selectors.
+
+## API Overview
+
+All REST endpoints use the `/api/v1` prefix and require a bearer token unless noted. The full schema is available at `/docs`.
+
+| Method | Endpoint | Purpose |
 |---|---|---|
-| POST | /api/v1/auth/register | Register user |
-| POST | /api/v1/auth/login | Login (returns JWT) |
-| GET | /api/v1/auth/me | Current user |
-| GET | /api/v1/health | System health |
-| GET | /api/v1/system/model-info | Model metadata |
-| POST | /api/v1/inference/row | Detect single row (JSON) |
-| POST | /api/v1/inference/csv | Batch CSV detection |
-| GET | /api/v1/monitoring/latest | Recent detections |
-| GET | /api/v1/monitoring/history | Paginated history |
-| GET | /api/v1/alarms | List alarms (filterable) |
-| GET | /api/v1/alarms/{id} | Alarm detail |
-| POST | /api/v1/alarms/{id}/acknowledge | Acknowledge |
-| POST | /api/v1/alarms/{id}/resolve | Resolve / mark FP |
-| GET | /api/v1/analytics/overview | Stats summary |
-| GET | /api/v1/analytics/recent | Recent predictions |
-| GET | /api/v1/analytics/alarms | Alarm statistics |
-| POST | /api/v1/chat | AI assistant |
-| POST | /api/v1/simulator/start | Start CSV replay |
-| POST | /api/v1/simulator/stop | Stop simulator |
-| POST | /api/v1/simulator/pause | Pause/resume |
-| GET | /api/v1/simulator/status | Simulator status |
-| WS | /api/v1/ws/monitor | Live event stream |
+| `POST` | `/auth/register` | Create an account |
+| `POST` | `/auth/login` | Obtain a JWT |
+| `GET` | `/auth/me` | Current account |
+| `GET` | `/health` | Health status |
+| `GET` | `/system/model-info` | Model metadata |
+| `POST` | `/inference/row` | Classify one sensor row; optional `history` array of up to five preceding rows |
+| `POST` | `/inference/csv` | Analyze a CSV upload |
+| `POST` | `/inference/csv/stream` | Analyze CSV and return newline-delimited result batches |
+| `GET` | `/monitoring/latest` | Latest persisted detections |
+| `GET` | `/monitoring/history` | Paginated detection history |
+| `DELETE` | `/monitoring/history` | Delete selected detection IDs and linked alarms |
+| `GET` | `/alarms` | List alarms, optionally filtered by severity or status |
+| `POST` | `/alarms/{id}/acknowledge` | Acknowledge an alarm |
+| `POST` | `/alarms/{id}/resolve` | Resolve or mark as false positive |
+| `GET` | `/analytics/overview` | Detection and alarm summary |
+| `GET` | `/analytics/recent` | Recent predictions |
+| `POST` | `/chat` | Chat or request detection analysis |
+| `POST` | `/simulator/start` | Start dataset replay |
+| `POST` | `/simulator/pause` | Toggle pause/resume |
+| `POST` | `/simulator/stop` | Stop replay |
+| `GET` | `/simulator/status` | Replay status |
+| `WS` | `/ws/monitor` | Live detection stream |
 
----
+Example row request (include all required sensor fields for the configured model):
 
-## RBAC
+```json
+{
+  "FIT101": 0.0,
+  "history": []
+}
+```
 
-| Action | ADMIN | SECURITY_ANALYST | OPERATOR |
-|---|---|---|---|
-| View dashboard / analytics | ✅ | ✅ | ✅ |
-| Upload CSV / detect row | ✅ | ✅ | ✅ |
-| Acknowledge alarms | ✅ | ✅ | ✅ |
-| Resolve / mark false positive | ✅ | ✅ | ❌ |
-| Manage users | ✅ | ❌ | ❌ |
-| View model info | ✅ | ✅ | ✅ |
-| AI chatbot | ✅ | ✅ | ✅ |
+The example is illustrative only; the validator requires the complete set of expected sensor columns. Check the model metadata and `/docs` for request schemas.
 
----
+## Optional AI Assistant
 
-## ML Integration Detail
+The assistant can respond to general conversation or analyze supplied detection context. For provider-backed replies, set `LLM_PROVIDER`, `LLM_API_KEY`, and `LLM_MODEL` in `backend/.env`. Without a key, the API uses a limited fallback response.
 
-1. **Startup:** `init_model_engine()` loads `best_model.joblib` once via joblib. `feature_names_in_` extracted directly from the model.
-2. **Inference:** Incoming 42-column dict → `compute_rolling_features()` computes `roll_mean5`, `roll_std5`, `diff5` for each column (min_periods=1, so single rows work) → 168-column DataFrame passed to `model.predict_proba()`.
-3. **Threshold:** `P(Attack) ≥ 0.70` → ML prediction = Attack.
-4. **No scaler:** Model was trained on raw values; no StandardScaler or MinMaxScaler is embedded or needed.
+AI output is advisory, may be inaccurate, and must be checked against approved incident-response procedures. Do not provide the assistant with secrets, sensitive plant details, or data that you are not authorized to share with the configured provider.
 
----
+## Development Checks
 
-## False-Alarm Reduction
+From the repository root:
 
-- **Fusion OR logic:** either ML or rules must trigger — reduces ML-only false positives
-- **Suspicious zone:** 0.50 ≤ ML prob < 0.70 → "Suspicious" (not a full alarm)
-- **Alarm cooldown:** duplicate alarms of same severity suppressed within 2-minute window
-- **Analyst feedback:** any alarm can be marked False Positive, tracked in DB
-- **Separation:** ML result, rule result, fusion result, and alarm suppression are kept as distinct stages
+```powershell
+Push-Location backend
+.\.venv\Scripts\python.exe -m compileall app
+Pop-Location
 
----
+Push-Location frontend
+npm run build
+Pop-Location
+```
 
-## Chatbot Safety
+## Safety and Limitations
 
-The AI assistant (Groq/OpenAI backend) is **advisory only**:
-- ❌ Cannot control PLCs, actuators, or valves
-- ❌ Cannot disable alarms
-- ❌ Cannot execute system commands
-- ✅ Explains detections and rule violations
-- ✅ Suggests investigation steps
-- ✅ Answers questions about historical alarms
-
-Configure: set `LLM_API_KEY` and `LLM_PROVIDER=groq` (or `openai`) in `.env`.  
-Without an API key, the chatbot returns a graceful fallback message.
-
----
-
-## Tests Actually Executed
-
-All executed in this session without a live PostgreSQL — using SQLite:
-
-| # | Test | Result |
-|---|---|---|
-| 1 | Model loads (168 features, RandomForestClassifier) | ✅ PASS |
-| 2 | predict_proba() returns [P(Normal), P(Attack)] | ✅ PASS |
-| 3 | compute_rolling_features() produces correct 168 cols | ✅ PASS |
-| 4 | Validator: valid row accepted | ✅ PASS |
-| 5 | Validator: missing field (MISSING error code) | ✅ PASS |
-| 6 | Validator: NaN value (NAN error code) | ✅ PASS |
-| 7 | Validator: non-numeric string (INVALID_TYPE) | ✅ PASS |
-| 8 | Rule engine: attack pattern → 9 violations | ✅ PASS |
-| 9 | Rule engine: normal-ish pattern → 0 violations | ✅ PASS |
-| 10 | Fusion: ML-only (p=0.85) → Attack, HIGH | ✅ PASS |
-| 11 | Fusion: rule-only (p=0.40, 2 rules) → Attack, MEDIUM | ✅ PASS |
-| 12 | Fusion: nothing → Normal | ✅ PASS |
-| 13 | Fusion: borderline (p=0.55) → Suspicious | ✅ PASS |
-| 14 | DetectionService end-to-end: Attack, 9 rules | ✅ PASS |
-| 15 | Password hash + verify | ✅ PASS |
-| 16 | JWT create + decode | ✅ PASS |
-| 17 | DB: user seed and query | ✅ PASS |
-| 18 | Alarm created after attack detection | ✅ PASS |
-| 19 | Alarm acknowledged | ✅ PASS |
-| 20 | False positive marked | ✅ PASS |
-| 21 | Alarm resolved | ✅ PASS |
-| 22 | Analytics count query | ✅ PASS |
-| 23 | Frontend TypeScript build (npm run build) | ✅ PASS |
-
-**Not tested (requires live service):**
-- WebSocket real-time broadcast (requires running uvicorn + connected client)
-- Simulator CSV replay (requires NewTestData.csv placed in data/)
-- AI chatbot LLM response (requires LLM_API_KEY)
-- PostgreSQL-specific Alembic migrations (tested with SQLite)
-- Full HTTP API routes via FastAPI TestClient (requires pytest setup)
-
----
-
-## Limitations
-
-1. Rolling features for a single isolated row use `min_periods=1` — this means `roll_std5=0` and `roll_diff5=0` for the first row. For best accuracy, send rows in batches or use the CSV endpoint which computes rolling features across the full sequence.
-2. The 16 mined rules were validated on a **single 20k-row SWaT sample** — they may be sample-specific. Re-validate on the full SWaT dataset before reporting final metrics.
-3. The simulator requires `NewTestData.csv` placed in `ICS-Detection/data/`. The file is not included in this repo.
+- This software is for research and demonstration. It is not validated or certified for operational decisions.
+- Classifications and rules can produce false positives and false negatives. Do not treat a model probability as proof of an attack.
+- Dataset replay and offline CSV inference are not live plant monitoring.
+- The assistant cannot replace authorized operators, formal incident response, or independent verification.
+- Never use this application to issue PLC commands, change actuator states, suppress alarms, or control industrial processes.
+- Keep `.env` files and API keys private. If a key is committed or shared, revoke it at the provider and replace it.
 4. WebSocket authentication uses a query param token (`?token=...`). For production, use a proper WSS connection with header-based auth.
-#   I C S - D e t e c t i o n  
+#   I C S - D e t e c t i o n 
+ 
  

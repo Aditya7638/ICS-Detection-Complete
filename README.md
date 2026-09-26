@@ -299,3 +299,5 @@ All executed in this session without a live PostgreSQL — using SQLite:
 2. The 16 mined rules were validated on a **single 20k-row SWaT sample** — they may be sample-specific. Re-validate on the full SWaT dataset before reporting final metrics.
 3. The simulator requires `NewTestData.csv` placed in `ICS-Detection/data/`. The file is not included in this repo.
 4. WebSocket authentication uses a query param token (`?token=...`). For production, use a proper WSS connection with header-based auth.
+#   I C S - D e t e c t i o n  
+ 

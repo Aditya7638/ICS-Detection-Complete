@@ -5,7 +5,13 @@ from types import SimpleNamespace
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api.routes.chat import _build_context, _build_event_context, _fallback_reply
+from app.api.routes.chat import (
+    SYSTEM_PROMPT,
+    _build_context,
+    _build_event_context,
+    _build_llm_messages,
+    _fallback_reply,
+)
 from app.api.routes.inference import _persist_result
 from app.db.models import Base, Prediction, SensorReading, User
 
@@ -169,6 +175,27 @@ class ChatContextTests(unittest.TestCase):
         context = _build_context({"event_id": "not-owned"}, self.session, self.user)
         self.assertEqual(context["context_source"], "event record unavailable to this authenticated user")
         self.assertEqual(context["sensor_values"], "Unavailable")
+
+    def test_llm_prompt_answers_general_questions_without_forcing_investigation_format(self):
+        self.assertIn("Give a useful, direct answer to the user's actual question", SYSTEM_PROMPT)
+        self.assertIn("For general ICS questions", SYSTEM_PROMPT)
+        self.assertIn("Do not force this format on ordinary greetings or unrelated questions", SYSTEM_PROMPT)
+        self.assertIn("Never issue operational commands", SYSTEM_PROMPT)
+        self.assertIn("industrial equipment", SYSTEM_PROMPT)
+
+    def test_llm_messages_preserve_follow_up_history_and_current_context(self):
+        history = [
+            {"role": "user", "content": "Which sensor was implicated?"},
+            {"role": "assistant", "content": "LIT101 is recorded as affected."},
+            {"role": "user", "content": "What should I check next?"},
+        ]
+        context = {"event_id": "reading-1", "sensor_values": {"LIT101": 987.5}}
+
+        messages = _build_llm_messages(history, context)
+
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIn('"LIT101": 987.5', messages[0]["content"])
+        self.assertEqual(messages[1:], history)
 
 
 if __name__ == "__main__":

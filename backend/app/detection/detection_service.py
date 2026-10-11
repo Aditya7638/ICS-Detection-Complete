@@ -31,22 +31,44 @@ logger = logging.getLogger(__name__)
 _active_config_version: Optional[str] = None
 _active_config_id: Optional[str] = None
 _active_asset_criticalities: Dict[str, str] = {}
+_active_detection_settings = (0.70, "OR")
+_active_is_baseline = True
 
 
-def set_active_config(config_id: str, version: int, asset_criticalities: Dict[str, str]):
+def set_active_config(
+    config_id: str,
+    version: int,
+    asset_criticalities: Dict[str, str],
+    threshold: float,
+    fusion_strategy: str,
+    is_baseline: bool = False,
+):
     """Called by the config activation endpoint."""
     global _active_config_version, _active_config_id, _active_asset_criticalities
+    global _active_detection_settings, _active_is_baseline
+    strategy = fusion_strategy.upper()
+    if strategy not in {"OR", "RF_OR_RULES", "RF_ONLY"}:
+        raise ValueError(f"Unsupported live fusion strategy: {strategy}")
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("Detection threshold must be between 0 and 1.")
     _active_config_id = config_id
     _active_config_version = f"v{version}"
     _active_asset_criticalities = dict(asset_criticalities)
-    logger.info(f"Active detection config updated: id={config_id} version={version}")
+    _active_detection_settings = (threshold, strategy)
+    _active_is_baseline = is_baseline
+    logger.info(
+        f"Active detection config updated: id={config_id} version={version} "
+        f"threshold={threshold} fusion={strategy}"
+    )
 
 
 def get_active_config_info() -> Dict[str, Any]:
     return {
         "config_id": _active_config_id,
         "config_version": _active_config_version,
-        "is_baseline": _active_config_id is None,
+        "is_baseline": _active_is_baseline,
+        "threshold": _active_detection_settings[0],
+        "fusion_strategy": _active_detection_settings[1],
         "asset_criticalities": _active_asset_criticalities,
     }
 
@@ -122,9 +144,14 @@ def detect(sensor_row: dict,
 
     model = get_model_engine()
     fusion = get_fusion_engine()
+    active_threshold, active_fusion_strategy = _active_detection_settings
 
     # 1. ML inference
-    ml_result: MLResult = model.predict_single(sensor_row, history=history)
+    ml_result: MLResult = model.predict_single(
+        sensor_row,
+        history=history,
+        threshold=active_threshold,
+    )
 
     # 2. Rule engine
     rule_result: RuleEngineResult = run_rules(sensor_row)
@@ -136,6 +163,8 @@ def detect(sensor_row: dict,
         rule_violated=rule_result.violated,
         violation_count=rule_result.violation_count,
         violations=rule_result.violations,
+        threshold=active_threshold,
+        fusion_strategy=active_fusion_strategy,
     )
 
     # 4. Risk score (heuristic — uses active asset criticalities)

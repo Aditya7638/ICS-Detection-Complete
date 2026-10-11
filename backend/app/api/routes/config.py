@@ -224,6 +224,11 @@ def activate_config(
     if cfg.threshold is None and not cfg.is_baseline:
         raise HTTPException(400,
             "Config has no resolved threshold. Run optimization first, then activate.")
+    if cfg.fusion_strategy not in {"OR", "RF_ONLY", "RF_OR_RULES"}:
+        raise HTTPException(
+            400,
+            f"Fusion strategy {cfg.fusion_strategy} is not supported by live detection.",
+        )
 
     # Deactivate current active
     db.query(DetectionConfig).filter(DetectionConfig.is_active == True).update(
@@ -242,6 +247,9 @@ def activate_config(
         config_id=cfg.id,
         version=cfg.version,
         asset_criticalities=asset_crits,
+        threshold=cfg.threshold if cfg.threshold is not None else 0.70,
+        fusion_strategy=cfg.fusion_strategy,
+        is_baseline=cfg.is_baseline,
     )
 
     logger.info(
@@ -250,7 +258,7 @@ def activate_config(
     )
     return {"ok": True, "activated_config_id": cfg.id, "name": cfg.name,
             "threshold": cfg.threshold, "fusion_strategy": cfg.fusion_strategy,
-            "note": "Production detection logic updated. Baseline remains available for comparison and rollback."}
+            "note": "Threshold and fusion strategy applied to new detections. Baseline remains available for comparison and rollback."}
 
 
 @router.post("/restore-baseline")
@@ -271,7 +279,14 @@ def restore_baseline(
     db.commit()
 
     # Restore in-memory state to baseline
-    set_active_config(config_id=baseline.id, version=baseline.version, asset_criticalities={})
+    set_active_config(
+        config_id=baseline.id,
+        version=baseline.version,
+        asset_criticalities={},
+        threshold=baseline.threshold if baseline.threshold is not None else 0.70,
+        fusion_strategy=baseline.fusion_strategy,
+        is_baseline=True,
+    )
 
     logger.info(f"Baseline config restored by {user.username}")
     return {"ok": True, "message": "Baseline OR fusion (t=0.70) restored."}

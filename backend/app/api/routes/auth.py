@@ -16,7 +16,7 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == req.email).first():
         raise HTTPException(400, "Email already exists")
     user = User(id=str(uuid.uuid4()), username=req.username, email=req.email,
-                password_hash=hash_password(req.password), role=req.role)
+                password_hash=hash_password(req.password), role=UserRole.OPERATOR)
     db.add(user)
     db.commit()
     db.refresh(user)

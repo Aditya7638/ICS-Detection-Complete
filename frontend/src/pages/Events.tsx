@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ChevronLeft, ChevronRight, Clock3, LoaderCircle, Search, ShieldAlert, ScrollText, MessageSquare } from 'lucide-react'
+import { AlertTriangle, CalendarClock, ChevronLeft, ChevronRight, Clock3, LoaderCircle, RotateCw, Search, ShieldAlert, ScrollText, MessageSquare } from 'lucide-react'
 import { getEvent, listEvents } from '../services/api'
 
 interface DetectionEvent {
@@ -45,6 +45,25 @@ function errorMessage(error: unknown): string {
 }
 
 const LIMIT = 30
+const EMPTY_FILTERS: EventFilters = {
+  final_label: '', severity: '', start_time: '', end_time: '', affected_sensor: '', rule_id: '',
+}
+const AUTO_REFRESH_MS = 15_000
+interface EventListResponse { results: DetectionEvent[]; total: number; offset: number }
+
+function loadEvents(filters: EventFilters, offset: number): Promise<EventListResponse> {
+  return listEvents({
+    final_label: filters.final_label || undefined,
+    severity: filters.severity || undefined,
+    start_time: filters.start_time ? new Date(filters.start_time).toISOString() : undefined,
+    end_time: filters.end_time ? new Date(filters.end_time).toISOString() : undefined,
+    affected_sensor: filters.affected_sensor.trim() || undefined,
+    rule_id: filters.rule_id.trim() || undefined,
+    limit: LIMIT,
+    offset,
+  }) as Promise<EventListResponse>
+}
+
 const inputClass = 'rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-200 outline-none focus:border-cyan-500'
 const labelColor: Record<string, string> = {
   Attack: 'border-red-800 bg-red-950/30 text-red-300',
@@ -52,44 +71,86 @@ const labelColor: Record<string, string> = {
   Normal: 'border-green-800 bg-green-950/30 text-green-300',
 }
 
+function openDatePicker(input: HTMLInputElement | null) {
+  if (!input) return
+  if (typeof input.showPicker !== 'function') {
+    input.focus()
+    return
+  }
+  try {
+    input.showPicker()
+  } catch {
+    input.focus()
+  }
+}
+
 export default function Events() {
   const navigate = useNavigate()
-  const [filters, setFilters] = useState<EventFilters>({
-    final_label: '', severity: '', start_time: '', end_time: '', affected_sensor: '', rule_id: '',
-  })
+  const fromInputRef = useRef<HTMLInputElement>(null)
+  const toInputRef = useRef<HTMLInputElement>(null)
+  const [filters, setFilters] = useState<EventFilters>(EMPTY_FILTERS)
   const [events, setEvents] = useState<DetectionEvent[]>([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [detail, setDetail] = useState<EventDetail | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [error, setError] = useState('')
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const appliedSearchRef = useRef({ filters: EMPTY_FILTERS, offset: 0 })
+  const requestIdRef = useRef(0)
 
-  const search = async (nextOffset = 0) => {
-    setLoading(true)
+  const fetchEvents = useCallback(async (
+    selectedFilters: EventFilters,
+    nextOffset: number,
+    showLoading: boolean,
+    clearDetail: boolean,
+  ) => {
+    const requestId = ++requestIdRef.current
+    if (showLoading) setLoading(true)
     setError('')
-    setDetail(null)
+    if (clearDetail) setDetail(null)
     try {
-      const params = {
-        final_label: filters.final_label || undefined,
-        severity: filters.severity || undefined,
-        start_time: filters.start_time ? new Date(filters.start_time).toISOString() : undefined,
-        end_time: filters.end_time ? new Date(filters.end_time).toISOString() : undefined,
-        affected_sensor: filters.affected_sensor.trim() || undefined,
-        rule_id: filters.rule_id.trim() || undefined,
-        limit: LIMIT,
-        offset: nextOffset,
-      }
-      const result = await listEvents(params) as { results: DetectionEvent[]; total: number; offset: number }
+      const result = await loadEvents(selectedFilters, nextOffset)
+      if (requestId !== requestIdRef.current) return
       setEvents(result.results)
       setTotal(result.total)
       setOffset(result.offset)
+      setLastUpdated(new Date())
     } catch (searchError) {
-      setError(errorMessage(searchError))
+      if (requestId === requestIdRef.current) setError(errorMessage(searchError))
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) setLoading(false)
     }
+  }, [])
+
+  const search = (selectedFilters: EventFilters, nextOffset = 0) => {
+    appliedSearchRef.current = { filters: selectedFilters, offset: nextOffset }
+    void fetchEvents(selectedFilters, nextOffset, true, true)
   }
+
+  const refreshCurrentResults = useCallback(() => {
+    const { filters: appliedFilters, offset: appliedOffset } = appliedSearchRef.current
+    void fetchEvents(appliedFilters, appliedOffset, false, false)
+  }, [fetchEvents])
+
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') refreshCurrentResults()
+    }
+    const initialRefresh = window.setTimeout(refreshCurrentResults, 0)
+    const interval = window.setInterval(refreshIfVisible, AUTO_REFRESH_MS)
+    window.addEventListener('focus', refreshIfVisible)
+    document.addEventListener('visibilitychange', refreshIfVisible)
+
+    return () => {
+      window.clearTimeout(initialRefresh)
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refreshIfVisible)
+      document.removeEventListener('visibilitychange', refreshIfVisible)
+      requestIdRef.current += 1
+    }
+  }, [fetchEvents, refreshCurrentResults])
 
   const openDetail = async (id: string) => {
     setDetailLoading(true)
@@ -118,7 +179,7 @@ export default function Events() {
 
       {error && <div role="alert" className="rounded-lg border border-red-800 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</div>}
 
-      <form onSubmit={event => { event.preventDefault(); void search(0) }} className="grid gap-3 rounded-xl border border-gray-800 bg-gray-900 p-4 sm:grid-cols-2 xl:grid-cols-3">
+      <form onSubmit={event => { event.preventDefault(); void search(filters) }} className="grid gap-3 rounded-xl border border-gray-800 bg-gray-900 p-4 sm:grid-cols-2 xl:grid-cols-3">
         <label className="space-y-1 text-xs text-gray-400">
           Detection
           <select value={filters.final_label} onChange={event => changeFilter('final_label', event.target.value)} className={`${inputClass} w-full`}>
@@ -143,13 +204,31 @@ export default function Events() {
         </label>
         <label className="space-y-1 text-xs text-gray-400">
           From
-          <input type="datetime-local" value={filters.start_time} onChange={event => changeFilter('start_time', event.target.value)}
-            className={`${inputClass} w-full`} />
+          <span className="relative block">
+            <input ref={fromInputRef} type="datetime-local" value={filters.start_time}
+              onClick={() => openDatePicker(fromInputRef.current)}
+              onChange={event => changeFilter('start_time', event.target.value)}
+              className={`${inputClass} w-full cursor-pointer pr-11`} />
+            <button type="button" onClick={() => openDatePicker(fromInputRef.current)}
+              aria-label="Open From date and time picker" title="Choose start date and time"
+              className="absolute inset-y-0 right-0 inline-flex w-10 items-center justify-center rounded-r-lg border-l border-gray-700 bg-gray-800 text-cyan-200 transition-colors hover:bg-cyan-900 hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400">
+              <CalendarClock size={17} />
+            </button>
+          </span>
         </label>
         <label className="space-y-1 text-xs text-gray-400">
           To
-          <input type="datetime-local" value={filters.end_time} onChange={event => changeFilter('end_time', event.target.value)}
-            className={`${inputClass} w-full`} />
+          <span className="relative block">
+            <input ref={toInputRef} type="datetime-local" value={filters.end_time}
+              onClick={() => openDatePicker(toInputRef.current)}
+              onChange={event => changeFilter('end_time', event.target.value)}
+              className={`${inputClass} w-full cursor-pointer pr-11`} />
+            <button type="button" onClick={() => openDatePicker(toInputRef.current)}
+              aria-label="Open To date and time picker" title="Choose end date and time"
+              className="absolute inset-y-0 right-0 inline-flex w-10 items-center justify-center rounded-r-lg border-l border-gray-700 bg-gray-800 text-cyan-200 transition-colors hover:bg-cyan-900 hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400">
+              <CalendarClock size={17} />
+            </button>
+          </span>
         </label>
         <button type="submit" disabled={loading} className="inline-flex items-center justify-center gap-2 rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-600 disabled:opacity-50 sm:col-span-2 xl:col-span-3">
           {loading ? <LoaderCircle size={16} className="animate-spin" /> : <Search size={16} />} Search events
@@ -160,10 +239,20 @@ export default function Events() {
         <section className="space-y-3">
           <div className="flex items-center justify-between text-sm">
             <h2 className="font-semibold text-white">Results</h2>
-            <span className="text-gray-500">{total.toLocaleString()} events</span>
+            <div className="flex items-center gap-3">
+              <span className="text-gray-500">{total.toLocaleString()} events</span>
+              <button type="button" onClick={refreshCurrentResults} disabled={loading}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-xs text-gray-300 transition-colors hover:border-cyan-700 hover:text-cyan-200 disabled:opacity-50"
+                title="Refresh event results">
+                <RotateCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh
+              </button>
+            </div>
           </div>
+          <p className="text-[11px] text-gray-600">
+            Auto-refreshes every 15 seconds{lastUpdated ? ` · Updated ${lastUpdated.toLocaleTimeString()}` : ''}
+          </p>
           {loading ? <p className="text-sm text-gray-500">Loading events…</p>
-            : events.length === 0 ? <p className="rounded-xl border border-gray-800 bg-gray-900 p-5 text-sm text-gray-500">Search for events to view saved detections.</p>
+            : events.length === 0 ? <p className="rounded-xl border border-gray-800 bg-gray-900 p-5 text-sm text-gray-500">No saved detections match these filters.</p>
               : events.map(item => (
                 <button key={item.id} onClick={() => void openDetail(item.id)}
                   className="w-full rounded-xl border border-gray-800 bg-gray-900 p-4 text-left transition-colors hover:border-gray-600">
@@ -175,7 +264,7 @@ export default function Events() {
                     <span className="flex items-center gap-1 text-xs text-gray-500"><Clock3 size={13} />{new Date(item.timestamp).toLocaleString()}</span>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-400">
-                    <span>Attack probability: {(item.ml_probability * 100).toFixed(1)}%</span>
+                    <span>ML anomaly score: {(item.ml_probability * 100).toFixed(1)}%</span>
                     <span>Rule violations: {item.rule_violation_count}</span>
                     <span>Source: {item.source ?? 'unknown'}</span>
                   </div>
@@ -184,12 +273,12 @@ export default function Events() {
                 </button>
               ))}
           <div className="flex items-center justify-between pt-1">
-            <button type="button" onClick={() => void search(Math.max(0, offset - LIMIT))}
+            <button type="button" onClick={() => void search(filters, Math.max(0, offset - LIMIT))}
               disabled={loading || offset === 0} className="inline-flex items-center gap-1 rounded-lg bg-gray-800 px-3 py-2 text-xs text-gray-300 disabled:opacity-40">
               <ChevronLeft size={14} /> Previous
             </button>
             <span className="text-xs text-gray-600">{total ? `${offset + 1}–${Math.min(offset + events.length, total)} of ${total}` : 'No results'}</span>
-            <button type="button" onClick={() => void search(offset + LIMIT)}
+            <button type="button" onClick={() => void search(filters, offset + LIMIT)}
               disabled={loading || offset + LIMIT >= total} className="inline-flex items-center gap-1 rounded-lg bg-gray-800 px-3 py-2 text-xs text-gray-300 disabled:opacity-40">
               Next <ChevronRight size={14} />
             </button>
@@ -207,7 +296,7 @@ export default function Events() {
                     <p className="mt-1 text-xs text-gray-500">{new Date(detail.timestamp).toLocaleString()} · {detail.source ?? 'unknown source'}</p>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
-                    <p className="rounded bg-gray-950 p-2 text-gray-400">ML probability <span className="block pt-1 text-white">{(detail.ml_probability * 100).toFixed(2)}%</span></p>
+                    <p className="rounded bg-gray-950 p-2 text-gray-400">ML anomaly score <span className="block pt-1 text-white">{(detail.ml_probability * 100).toFixed(2)}%</span></p>
                     <p className="rounded bg-gray-950 p-2 text-gray-400">ML label <span className="block pt-1 text-white">{detail.ml_label ?? '—'}</span></p>
                   </div>
                   {detail.explanation && <p className="text-gray-300">{detail.explanation}</p>}

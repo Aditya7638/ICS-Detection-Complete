@@ -17,8 +17,8 @@ export const login = (username: string, password: string) =>
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
   }).then(r => r.data)
 
-export const register = (username: string, email: string, password: string, role: string) =>
-  api.post('/auth/register', { username, email, password, role }).then(r => r.data)
+export const register = (username: string, email: string, password: string) =>
+  api.post('/auth/register', { username, email, password }).then(r => r.data)
 
 export const getCurrentUser = () => api.get('/auth/me').then(r => r.data)
 

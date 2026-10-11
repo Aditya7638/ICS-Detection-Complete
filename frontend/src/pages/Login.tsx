@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAuth } from '../hooks/useAuth'
+import { useAuth } from '../hooks/useAuth.ts'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Shield, AlertCircle } from 'lucide-react'
 

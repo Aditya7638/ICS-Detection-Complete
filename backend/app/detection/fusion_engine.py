@@ -48,14 +48,18 @@ class FusionEngine:
              ml_label: str,
              rule_violated: bool,
              violation_count: int,
-             violations: List[Dict[str, Any]]) -> FusionResult:
+             violations: List[Dict[str, Any]],
+             threshold: Optional[float] = None,
+             fusion_strategy: Optional[str] = None) -> FusionResult:
 
-        ml_triggered = ml_probability >= self.threshold
+        active_threshold = self.threshold if threshold is None else threshold
+        active_strategy = self.fusion_logic if fusion_strategy is None else fusion_strategy.upper()
+        if active_strategy not in {"OR", "RF_OR_RULES", "RF_ONLY"}:
+            raise ValueError(f"Unsupported live fusion strategy: {active_strategy}")
+        ml_triggered = ml_probability >= active_threshold
+        rule_contributes = active_strategy != "RF_ONLY"
 
-        if self.fusion_logic == "OR":
-            is_attack = ml_triggered or rule_violated
-        else:
-            is_attack = ml_triggered and rule_violated  # AND fallback
+        is_attack = ml_triggered or (rule_violated and rule_contributes)
 
         if not is_attack:
             # Still suspicious if ML close to threshold
@@ -67,7 +71,7 @@ class FusionEngine:
                 severity = None
         else:
             final_label = "Attack"
-            if ml_triggered and rule_violated:
+            if ml_triggered and rule_violated and rule_contributes:
                 severity = "CRITICAL" if ml_probability >= 0.90 else "HIGH"
             elif ml_triggered:
                 severity = "HIGH" if ml_probability >= 0.85 else "MEDIUM"
@@ -81,7 +85,10 @@ class FusionEngine:
                 if k not in ("threshold",) and k not in affected:
                     affected.append(k)
 
-        explanation = self._build_explanation(final_label, ml_probability, ml_triggered, rule_violated, violations)
+        explanation = self._build_explanation(
+            final_label, ml_probability, ml_triggered, rule_violated, violations,
+            active_threshold, active_strategy,
+        )
         recommendations = self._build_recommendations(final_label, severity, violations, affected)
 
         return FusionResult(
@@ -96,14 +103,19 @@ class FusionEngine:
             affected_sensors=affected,
         )
 
-    def _build_explanation(self, label, prob, ml_trig, rule_trig, violations) -> str:
+    def _build_explanation(self, label, prob, ml_trig, rule_trig, violations, threshold, strategy) -> str:
         parts = [f"Detection: {label}."]
-        parts.append(f"ML confidence: {prob*100:.1f}% (threshold: {self.threshold*100:.0f}%).")
+        parts.append(f"ML anomaly score: {prob*100:.1f}% (threshold: {threshold*100:.1f}%).")
+        parts.append(f"Fusion strategy: {strategy}.")
         if ml_trig:
             parts.append("ML model flagged this reading as anomalous.")
         if rule_trig:
             v_ids = ", ".join(v["rule_id"] for v in violations)
             parts.append(f"Rule violations: {v_ids}.")
+            if strategy != "RF_ONLY":
+                parts.append("Rule violations contributed to the fused detection.")
+            else:
+                parts.append("Rule violations were observed but are not used by the RF_ONLY fusion strategy.")
             for v in violations:
                 parts.append(f"  [{v['rule_id']}] {v['message']}")
         if not ml_trig and not rule_trig:

@@ -8,6 +8,7 @@ Endpoints:
   POST /optimizer/evaluate     Run full baseline comparison (A-F)
 """
 
+import csv
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,19 +37,28 @@ EVAL_DATASET_CANDIDATES = [
 
 
 def _find_dataset(override: Optional[str] = None) -> str:
-    base = Path(__file__).parent.parent.parent.parent
+    base = Path(__file__).resolve().parents[4]
     if override:
         p = base / override
-        if p.exists():
-            return str(p)
-        raise FileNotFoundError(f"Dataset not found: {override}")
+        if not p.is_file():
+            raise FileNotFoundError(f"Dataset not found: {override}")
+        if not _has_label_column(p):
+            raise ValueError(f"Dataset is missing the required 'Normal/Attack' label column: {override}")
+        return str(p)
     for candidate in EVAL_DATASET_CANDIDATES:
         p = base / candidate
-        if p.exists():
+        if p.is_file() and _has_label_column(p):
             return str(p)
     raise FileNotFoundError(
-        f"No evaluation dataset found. Expected one of: {EVAL_DATASET_CANDIDATES}"
+        "No labeled evaluation dataset found. Expected a CSV with a 'Normal/Attack' "
+        f"label column in one of: {EVAL_DATASET_CANDIDATES}"
     )
+
+
+def _has_label_column(path: Path) -> bool:
+    with path.open("r", newline="", encoding="utf-8-sig") as dataset_file:
+        headers = next(csv.reader(dataset_file), [])
+    return "Normal/Attack" in {header.strip() for header in headers}
 
 
 def _run_optimization_sync(
@@ -115,7 +125,7 @@ def _run_optimization_sync(
             # Update config with resolved threshold if feasible
             if outcome.feasible and outcome.selected_threshold is not None:
                 cfg.threshold = outcome.selected_threshold
-                cfg.fusion_strategy = outcome.selected_fusion.replace("RF_ONLY", "OR")
+                cfg.fusion_strategy = outcome.selected_fusion
                 cfg.optimization_outcome = {
                     "feasible": True,
                     "selected_threshold": outcome.selected_threshold,
@@ -166,6 +176,8 @@ async def run_optimization_endpoint(
         dataset_path = _find_dataset(req.dataset_path)
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
     run_id = str(uuid.uuid4())
     run = OptimizationResult(

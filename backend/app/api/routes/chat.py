@@ -17,7 +17,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 settings = get_settings()
 
-SYSTEM_PROMPT = """You are an ICS cybersecurity investigation assistant. Analyze the selected detection using only the evidence provided. Be concise, specific, and technically accurate. Lead with the suspected problem, then evidence, then prioritized investigation steps. Separate observed facts from hypotheses. Never invent telemetry, rules, attack types, root causes, or confidence values. A high ML anomaly score is not proof of malicious activity. Do not claim to distinguish physical attacks from cyberattacks without supporting evidence. Explicitly state uncertainty when information is insufficient. Provide advisory investigation steps only; never issue commands to PLCs, actuators, valves, pumps, or other industrial equipment. Avoid generic advice unless it directly applies to the event. Target approximately 120–200 words for a standard investigation, with shorter answers for simple questions.
+SYSTEM_PROMPT = """You are an ICS cybersecurity and platform assistant. Give a useful, direct answer to the user's actual question; do not respond with a canned report or generic checklist. Use the conversation history to understand follow-ups and the supplied platform/event context when relevant. For general ICS questions, provide accurate domain knowledge and distinguish it from facts about this specific deployment. Do not claim access to live systems, logs, telemetry, configuration, or documentation unless that information is present in the supplied context. If a request is ambiguous in a way that changes the answer, state the assumption or ask one concise clarifying question.
+
+Be concise, specific, technically accurate, and professional. Explain technical terms briefly when useful. Prioritize recommendations and say what each check can establish. Avoid repetition, boilerplate, fabricated examples presented as real, and unnecessary headings. Short questions should receive short answers; use a few clear bullets when that makes a complex answer easier to act on.
+
+For a detection investigation, analyze only the evidence provided. Lead with the suspected problem, then evidence, then prioritized investigation steps. Separate observed facts from hypotheses. Never invent telemetry, rules, attack types, root causes, or confidence values. A high ML anomaly score is not proof of malicious activity. Do not claim to distinguish physical attacks from cyberattacks without supporting evidence. Explicitly state uncertainty when information is insufficient. Target approximately 120-200 words for a standard investigation, with shorter answers for simple questions.
 
 For a detection investigation, use these five headings in this order:
 ## 1. Incident Summary
@@ -196,6 +200,16 @@ def _format_context(context: dict[str, Any] | None) -> str:
     )
 
 
+def _build_llm_messages(
+    messages: list[dict[str, str]],
+    context: dict[str, Any] | None,
+) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + _format_context(context)},
+        *messages,
+    ]
+
+
 def _fallback_reply(context: dict[str, Any] | None, reason: str, user_message: str = "") -> str:
     """Return a concise evidence-grounded response when the configured LLM is unavailable."""
     if context is None:
@@ -340,10 +354,7 @@ def _call_llm(messages: list[dict[str, str]], context: dict[str, Any] | None) ->
     if not settings.LLM_API_KEY:
         return _fallback_reply(context, "LLM_API_KEY is not configured", user_message)
 
-    full_messages = [
-        {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + _format_context(context)},
-        *messages,
-    ]
+    full_messages = _build_llm_messages(messages, context)
     try:
         if settings.LLM_PROVIDER == "groq":
             from groq import Groq

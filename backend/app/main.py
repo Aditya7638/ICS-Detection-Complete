@@ -87,9 +87,17 @@ async def lifespan(app: FastAPI):
             # Restore active config to in-memory state on startup
             active = db2.query(DetectionConfig).filter(DetectionConfig.is_active == True).first()
             if active:
+                active_threshold = active.threshold
+                if active_threshold is None:
+                    if not active.is_baseline:
+                        raise RuntimeError(f"Active detection config {active.id} has no threshold.")
+                    active_threshold = 0.70
                 asset_crits = {a.asset_tag: a.criticality_level for a in active.critical_assets}
                 set_active_config(config_id=active.id, version=active.version,
-                                  asset_criticalities=asset_crits)
+                                  asset_criticalities=asset_crits,
+                                  threshold=active_threshold,
+                                  fusion_strategy=active.fusion_strategy,
+                                  is_baseline=active.is_baseline)
                 logger.info(f"Restored active config: {active.name} (id={active.id})")
     finally:
         db2.close()

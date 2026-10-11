@@ -13,7 +13,6 @@ class RegisterRequest(BaseModel):
     username: str
     email: str
     password: str = Field(min_length=9)
-    role: UserRole = UserRole.OPERATOR
 
     @field_validator("password")
     @classmethod
@@ -194,7 +193,7 @@ class ModelInfoResponse(BaseModel):
 
 VALID_PROFILES = {"HIGH_RECALL", "LOW_FP", "CRITICAL_ASSET", "BALANCED"}
 VALID_CRITICALITY = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
-VALID_FUSION = {"OR", "RISK_SCORE"}
+VALID_FUSION = {"OR", "RISK_SCORE", "RF_ONLY", "RF_OR_RULES"}
 
 class CriticalAssetIn(BaseModel):
     asset_tag: str = Field(min_length=2, max_length=32)

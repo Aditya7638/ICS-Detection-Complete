@@ -5,6 +5,7 @@ from app.detection.rule_adapter import get_active_rule_ids
 from app.schemas.schemas import ModelInfoResponse
 from app.auth.security import any_authenticated
 from app.db.models import User
+from app.detection.detection_service import get_active_config_info
 import json
 from pathlib import Path
 
@@ -23,6 +24,7 @@ def health():
 def model_info(user: User = Depends(any_authenticated)):
     m = get_model_engine()
     f = get_fusion_engine()
+    active_config = get_active_config_info()
     cfg = f.cfg
     return ModelInfoResponse(
         model_loaded=True,
@@ -34,8 +36,8 @@ def model_info(user: User = Depends(any_authenticated)):
         features=m.feature_names,
         classes=[0, 1],
         probability_supported=True,
-        decision_threshold=f.threshold,
-        fusion_logic=f.fusion_logic,
+        decision_threshold=active_config["threshold"],
+        fusion_logic=active_config["fusion_strategy"],
         active_rules=get_active_rule_ids(),
         validated_performance=cfg.get("validated_performance"),
     )

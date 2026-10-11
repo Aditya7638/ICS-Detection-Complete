@@ -191,7 +191,12 @@ export default function Optimizer() {
     const loadRuns = async () => {
       try {
         const result = await getOptimizationResults(selectedId) as OptimizationRun[]
-        if (!disposed) setRuns(result)
+        if (!disposed) {
+          setRuns(result)
+          if (running && result.some(run => run.constraints_satisfied !== null)) {
+            await refreshConfigs()
+          }
+        }
       } catch (loadError) {
         if (!disposed) setError(errorMessage(loadError))
       }
@@ -203,7 +208,7 @@ export default function Optimizer() {
       disposed = true
       window.clearInterval(timer)
     }
-  }, [selectedId, running])
+  }, [selectedId, running, refreshConfigs])
 
   const handleCreateConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -260,14 +265,17 @@ export default function Optimizer() {
   }
 
   const handleActivate = async (config: DetectionConfig) => {
-    if (!window.confirm(`Activate "${config.name}" for production detection?`)) return
+    const threshold = config.threshold ?? 0.70
+    if (!window.confirm(
+      `Activate "${config.name}" for new detections?\nThreshold: ${threshold.toFixed(3)}\nFusion: ${config.fusion_strategy}`,
+    )) return
     setBusy(true)
     setError('')
     setNotice('')
     try {
       await activateConfig(config.id)
       await refreshConfigs()
-      setNotice(`"${config.name}" is now active. Detection uses the new configuration immediately.`)
+      setNotice(`"${config.name}" is active for new detections (threshold ${threshold.toFixed(3)}, ${config.fusion_strategy} fusion).`)
     } catch (activateError) {
       setError(errorMessage(activateError))
     } finally {

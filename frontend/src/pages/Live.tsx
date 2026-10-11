@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWebSocket } from '../hooks/useWebSocket'
-import { getRecentPredictions, deletePredictions, streamCSV, startSimulator, stopSimulator, pauseSimulator } from '../services/api'
+import { getRecentPredictions, deletePredictions, streamCSV, startSimulator, stopSimulator, pauseSimulator, getSimulatorStatus } from '../services/api'
 import { Wifi, WifiOff, Play, Pause, Square, Upload, ListFilter, X, MessageSquare, Trash2, RotateCw } from 'lucide-react'
 
 interface Event { event_id: string; timestamp: string; final_label: string; ml_probability: number; severity: string | null; rule_violation_count: number; affected_sensors: string[]; rule_violations?: { rule_id?: string; message?: string; evidence?: Record<string, unknown> }[]; recommendations?: string[]; explanation?: string | null; source?: 'simulator' | 'csv_upload'; simulator?: boolean; true_label?: string }
@@ -22,6 +22,7 @@ export default function Live() {
   const [events, setEvents] = useState<Event[]>([])
   const [simRunning, setSimRunning] = useState(false)
   const [simPaused, setSimPaused] = useState(false)
+  const [simError, setSimError] = useState('')
   const [speed, setSpeed] = useState(5)
   const [csvLoading, setCsvLoading] = useState(false)
   const [csvBatches, setCsvBatches] = useState<CsvBatch[]>([])
@@ -34,6 +35,19 @@ export default function Live() {
   const [selectedPredictionIds, setSelectedPredictionIds] = useState<Set<string>>(new Set())
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getSimulatorStatus().then(status => {
+      if (cancelled) return
+      setSimRunning(status.running)
+      setSimPaused(status.paused)
+      setSpeed(status.speed)
+    }).catch(() => {
+      if (!cancelled) setSimError('Could not retrieve simulator status.')
+    })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     getRecentPredictions(200).then(predictions => {
@@ -52,7 +66,7 @@ export default function Live() {
         source: prediction.source,
         simulator: prediction.source === 'simulator',
       })))
-    }).catch(() => { /* Live feed can still receive new WebSocket events. */ })
+    }).catch(() => setSimError('Could not load saved detections. New WebSocket events may still appear.'))
   }, [])
 
   const onMessage = useCallback((data: any) => {
@@ -64,10 +78,34 @@ export default function Live() {
   const { connected } = useWebSocket(onMessage)
 
   const handleStartSim = async () => {
-    try { await startSimulator(speed); setSimRunning(true); setSimPaused(false) } catch (e: any) { alert(e.response?.data?.detail || 'Failed to start') }
+    setSimError('')
+    try {
+      await startSimulator(speed)
+      setSimRunning(true)
+      setSimPaused(false)
+    } catch (error: any) {
+      setSimError(error.response?.data?.detail || 'Failed to start the simulator.')
+    }
   }
-  const handleStopSim = async () => { await stopSimulator(); setSimRunning(false); setSimPaused(false) }
-  const handlePauseSim = async () => { await pauseSimulator(); setSimPaused(p => !p) }
+  const handleStopSim = async () => {
+    setSimError('')
+    try {
+      await stopSimulator()
+      setSimRunning(false)
+      setSimPaused(false)
+    } catch (error: any) {
+      setSimError(error.response?.data?.detail || 'Failed to stop the simulator.')
+    }
+  }
+  const handlePauseSim = async () => {
+    setSimError('')
+    try {
+      const status = await pauseSimulator()
+      setSimPaused(status.paused)
+    } catch (error: any) {
+      setSimError(error.response?.data?.detail || 'Failed to update simulator state.')
+    }
+  }
 
   const handleCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -91,9 +129,10 @@ export default function Live() {
         setEvents(prev => [...detections, ...prev].slice(0, MAX_VISIBLE_EVENTS))
       })
     } catch (err: any) {
-      alert('CSV upload failed: ' + err.message)
+      setSimError(`CSV upload failed: ${err.message}`)
     } finally {
       setCsvLoading(false)
+      if (fileRef.current) fileRef.current.value = ''
     }
   }
 
@@ -133,7 +172,7 @@ export default function Live() {
     try {
       setSavedPredictions(await getRecentPredictions(200))
     } catch {
-      alert('Could not refresh saved detections.')
+      setSimError('Could not refresh saved detections.')
     }
   }
 
@@ -146,7 +185,7 @@ export default function Live() {
       setEvents(previous => previous.filter(event => !selectedPredictionIds.has(event.event_id)))
       setSelectedPredictionIds(new Set())
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Could not delete the selected detections.')
+      setSimError(error.response?.data?.detail || 'Could not delete the selected detections.')
     }
   }
 
@@ -160,6 +199,8 @@ export default function Live() {
         </div>
       </div>
 
+      {simError && <div role="alert" className="rounded-lg border border-red-800 bg-red-950/40 px-4 py-3 text-sm text-red-300">{simError}</div>}
+
       {/* Controls */}
       <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 space-y-4">
         <div className="flex items-center gap-4 flex-wrap">
@@ -170,15 +211,15 @@ export default function Live() {
                 className={`px-3 py-1 rounded text-sm ${speed === s ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-400'}`}>{s}x</button>
             ))}
           </div>
-          <button onClick={handleStartSim} disabled={simRunning}
+          <button onClick={handleStartSim} disabled={simRunning || csvLoading}
             className="flex items-center gap-2 px-4 py-2 bg-green-700 hover:bg-green-600 disabled:bg-gray-700 text-white rounded-lg text-sm">
             <Play size={14} /> Start Simulator
           </button>
-          <button onClick={handlePauseSim} disabled={!simRunning}
+          <button onClick={handlePauseSim} disabled={!simRunning || csvLoading}
             className="flex items-center gap-2 px-4 py-2 bg-yellow-700 hover:bg-yellow-600 disabled:bg-gray-700 text-white rounded-lg text-sm">
             <Pause size={14} /> {simPaused ? 'Resume' : 'Pause'}
           </button>
-          <button onClick={handleStopSim} disabled={!simRunning}
+          <button onClick={handleStopSim} disabled={!simRunning || csvLoading}
             className="flex items-center gap-2 px-4 py-2 bg-red-800 hover:bg-red-700 disabled:bg-gray-700 text-white rounded-lg text-sm">
             <Square size={14} /> Stop
           </button>
@@ -192,8 +233,9 @@ export default function Live() {
 
         <div className="border-t border-gray-800 pt-4">
           <p className="text-sm text-gray-400 mb-2">Or upload a CSV for batch analysis:</p>
-          <button onClick={() => fileRef.current?.click()}
-            className="flex items-center gap-2 px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg text-sm">
+          <button onClick={() => fileRef.current?.click()} disabled={csvLoading || simRunning}
+            title={simRunning ? 'Stop the simulator before uploading a CSV.' : 'Upload a CSV for batch analysis'}
+            className="flex items-center gap-2 px-4 py-2 bg-cyan-700 hover:bg-cyan-600 disabled:cursor-not-allowed disabled:opacity-50 text-white rounded-lg text-sm">
             <Upload size={14} /> {csvLoading ? 'Processing…' : 'Upload CSV'}
           </button>
           <input ref={fileRef} type="file" accept=".csv" onChange={handleCSV} className="hidden" />

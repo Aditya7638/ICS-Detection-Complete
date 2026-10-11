@@ -79,12 +79,17 @@ class ModelEngine:
         # Return in exact model feature order
         return result[self.feature_names]
 
-    def predict_single(self, sensor_row: dict, history: Optional[List[dict]] = None) -> MLResult:
+    def predict_single(
+        self,
+        sensor_row: dict,
+        history: Optional[List[dict]] = None,
+        threshold: Optional[float] = None,
+    ) -> MLResult:
         """Predict one row, optionally using preceding rows for rolling features."""
         prior_rows = (history or [])[-self.rolling_window:]
         df = pd.DataFrame([*prior_rows, sensor_row])
         df_full = self.compute_rolling_features(df)
-        return self._run_inference(df_full.iloc[[-1]])
+        return self._run_inference(df_full.iloc[[-1]], threshold)
 
     def predict_batch(self, df_raw: pd.DataFrame) -> List[MLResult]:
         """Predict from a DataFrame of raw sensor rows (rolling computed across rows)."""
@@ -94,17 +99,18 @@ class ModelEngine:
             results.append(self._run_inference(df_full.iloc[[i]]))
         return results
 
-    def _run_inference(self, df_168: pd.DataFrame) -> MLResult:
+    def _run_inference(self, df_168: pd.DataFrame, threshold: Optional[float] = None) -> MLResult:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             proba = self.model.predict_proba(df_168)[0]
         p_attack = float(proba[1])
-        pred = 1 if p_attack >= self.threshold else 0
+        active_threshold = self.threshold if threshold is None else threshold
+        pred = 1 if p_attack >= active_threshold else 0
         return MLResult(
             prediction=pred,
             probability=p_attack,
             label="Attack" if pred == 1 else "Normal",
-            threshold_used=self.threshold,
+            threshold_used=active_threshold,
         )
 
 # Singleton

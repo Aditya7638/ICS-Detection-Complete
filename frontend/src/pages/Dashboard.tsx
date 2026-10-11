@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
-import { getOverview, getRecentPredictions, getHealth, getRiskDistribution, getActiveConfigInfo } from '../services/api'
-import { Activity, AlertTriangle, ShieldCheck, ShieldX, Cpu, Database, Wifi, TrendingUp, Target, Zap } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { getOverview, getRecentPredictions, getHealth, getRiskDistribution, getActiveConfigInfo, getModelInfo } from '../services/api'
+import { Activity, AlertTriangle, ShieldCheck, ShieldX, Cpu, Database, TrendingUp, Target, Zap } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 
 interface Overview {
@@ -35,23 +35,43 @@ export default function Dashboard() {
   const [health, setHealth] = useState<any>(null)
   const [riskDist, setRiskDist] = useState<any>(null)
   const [activeConfig, setActiveConfig] = useState<any>(null)
+  const [modelInfo, setModelInfo] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
-      const [ov, rec, h, rd, ac] = await Promise.all([
+      const [ov, rec, h, rd, ac, modelInfo] = await Promise.all([
         getOverview(),
         getRecentPredictions(20),
         getHealth(),
         getRiskDistribution().catch(() => null),
         getActiveConfigInfo().catch(() => null),
+        getModelInfo().catch(() => null),
       ])
       setOverview(ov); setRecent(rec); setHealth(h)
       setRiskDist(rd); setActiveConfig(ac)
-    } catch { /* keep stale */ } finally { setLoading(false) }
-  }
-
-  useEffect(() => { refresh(); const t = setInterval(refresh, 5000); return () => clearInterval(t) }, [])
+      setModelInfo(modelInfo)
+      setError('')
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : 'Dashboard data could not be refreshed.')
+    } finally { setLoading(false) }
+  }, [])
+  useEffect(() => {
+    let disposed = false
+    let interval: number | undefined
+    const startRefresh = () => {
+      if (disposed) return
+      void refresh()
+      interval = window.setInterval(() => { void refresh() }, 5000)
+    }
+    const initial = window.setTimeout(startRefresh, 0)
+    return () => {
+      disposed = true
+      window.clearTimeout(initial)
+      if (interval !== undefined) window.clearInterval(interval)
+    }
+  }, [refresh])
 
   const pieData = overview ? [
     { name: 'Normal', value: overview.normal_count },
@@ -77,6 +97,17 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1400px]">
+      {error && <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-800 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+        <span>Dashboard refresh failed: {error}{overview ? ' Showing the last available data.' : ''}</span>
+        <button onClick={() => void refresh()} className="shrink-0 rounded-md border border-red-700 px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-900/50">Retry</button>
+      </div>}
+      {!overview && !loading && (
+        <div className="rounded-xl border border-gray-800 bg-gray-900 p-6 text-center">
+          <p className="text-sm text-gray-300">Dashboard data is unavailable.</p>
+          <button onClick={() => void refresh()} className="mt-3 rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-600">Retry</button>
+        </div>
+      )}
+      {overview && <>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -86,12 +117,12 @@ export default function Dashboard() {
         <div className="flex items-center gap-2">
           {activeConfig && !activeConfig.is_baseline && (
             <span className="text-xs bg-cyan-900/40 border border-cyan-500/30 text-cyan-300 px-3 py-1 rounded-full">
-              ⚙️ Custom config active: {activeConfig.config_version}
+              Custom config active: {activeConfig.config_version} · threshold {activeConfig.threshold} · {activeConfig.fusion_strategy}
             </span>
           )}
           {activeConfig?.is_baseline && (
             <span className="text-xs bg-gray-800 border border-gray-600 text-gray-400 px-3 py-1 rounded-full">
-              Baseline OR fusion (t=0.70)
+              Baseline OR fusion · threshold {modelInfo?.decision_threshold !== undefined ? modelInfo.decision_threshold : 'unavailable'}
             </span>
           )}
           <div className={`w-2 h-2 rounded-full ${health?.model_loaded ? 'bg-green-400' : 'bg-red-400'} animate-pulse`} />
@@ -102,9 +133,10 @@ export default function Dashboard() {
       {/* System Status */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: 'Backend API', ok: !!health, icon: Database, sub: health ? 'Connected' : 'Offline' },
-          { label: 'ML Model', ok: health?.model_loaded, icon: Cpu, sub: health?.model_loaded ? 'RF t=0.70 loaded' : 'Not loaded' },
-          { label: 'Rule Engine', ok: !!health, icon: ShieldCheck, sub: health ? '16 active rules' : 'Offline' },
+          { label: 'Backend API', ok: health?.status === 'ok', icon: Database, sub: health?.status === 'ok' ? 'Connected' : health ? 'Degraded' : 'Offline' },
+          { label: 'ML Model', ok: health?.model_loaded, icon: Cpu, sub: health?.model_loaded ? 'Random Forest loaded' : 'Not loaded' },
+          { label: 'Rule Engine', ok: !!modelInfo?.active_rules?.length, icon: ShieldCheck,
+            sub: modelInfo ? `${modelInfo.active_rules?.length ?? 0} active rules` : 'Status unavailable' },
         ].map(({ label, ok, icon: Icon, sub }) => (
           <div key={label} className="bg-gray-900 border border-gray-700 rounded-xl p-4 flex items-center gap-3">
             <div className={`p-2 rounded-lg ${ok ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
@@ -128,7 +160,7 @@ export default function Dashboard() {
           { label: 'Active Alarms', value: overview?.active_alarms ?? 0, color: 'text-orange-400', icon: Zap, bg: 'bg-orange-500/10' },
           { label: 'Critical Alarms', value: overview?.critical_alarms ?? 0, color: 'text-red-500', icon: Target, bg: 'bg-red-500/10' },
           { label: 'False Positives', value: overview?.false_positive_count ?? 0, color: 'text-blue-400', icon: TrendingUp, bg: 'bg-blue-500/10' },
-          { label: 'Detection Rate', value: overview && overview.total_readings > 0 ? `${((overview.attack_count + overview.suspicious_count) / overview.total_readings * 100).toFixed(1)}%` : '0%', color: 'text-cyan-400', icon: Activity, bg: 'bg-cyan-500/10' },
+          { label: 'Readings Flagged', value: overview ? overview.attack_count + overview.suspicious_count : 0, color: 'text-cyan-400', icon: Activity, bg: 'bg-cyan-500/10' },
         ].map(({ label, value, color, icon: Icon, bg }) => (
           <div key={label} className="bg-gray-900 border border-gray-700 rounded-xl p-4 hover:border-gray-600 transition-colors">
             <div className="flex items-start justify-between">
@@ -284,6 +316,7 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+      </>}
     </div>
   )
 }

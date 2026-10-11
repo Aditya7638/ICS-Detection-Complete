@@ -4,23 +4,52 @@ const WS_URL = import.meta.env.VITE_WS_URL || `ws://${window.location.host}/api/
 
 export function useWebSocket(onMessage: (data: unknown) => void) {
   const ws = useRef<WebSocket | null>(null)
+  const reconnectTimer = useRef<number | null>(null)
+  const onMessageRef = useRef(onMessage)
+  const active = useRef(false)
   const [connected, setConnected] = useState(false)
 
-  const connect = useCallback(() => {
+  useEffect(() => {
+    onMessageRef.current = onMessage
+  }, [onMessage])
+
+  const connect = useCallback(function connectSocket() {
+    if (!active.current) return
     const token = localStorage.getItem('ics_token')
     const url = token ? `${WS_URL}?token=${token}` : WS_URL
     const socket = new WebSocket(url)
     ws.current = socket
 
-    socket.onopen = () => setConnected(true)
-    socket.onclose = () => { setConnected(false); setTimeout(connect, 3000) }
+    socket.onopen = () => {
+      if (active.current && ws.current === socket) setConnected(true)
+    }
+    socket.onclose = () => {
+      if (!active.current || ws.current !== socket) return
+      setConnected(false)
+      reconnectTimer.current = window.setTimeout(connectSocket, 3000)
+    }
     socket.onerror = () => socket.close()
-    socket.onmessage = e => { try { onMessage(JSON.parse(e.data)) } catch {} }
-  }, [onMessage])
+    socket.onmessage = event => {
+      let data: unknown
+      try {
+        data = JSON.parse(event.data)
+      } catch (error) {
+        console.error('Received invalid WebSocket message.', error)
+        return
+      }
+      onMessageRef.current(data)
+    }
+  }, [])
 
   useEffect(() => {
+    active.current = true
     connect()
-    return () => { ws.current?.close() }
+    return () => {
+      active.current = false
+      if (reconnectTimer.current !== null) window.clearTimeout(reconnectTimer.current)
+      ws.current?.close()
+      ws.current = null
+    }
   }, [connect])
 
   return { connected }

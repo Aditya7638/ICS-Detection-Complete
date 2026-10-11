@@ -7,7 +7,6 @@ export default function Register() {
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState('OPERATOR')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
@@ -28,7 +27,7 @@ export default function Register() {
 
     setLoading(true)
     try {
-      await register(username, email, password, role)
+      await register(username, email, password)
       navigate('/login?registered=1')
     } catch (requestError: any) {
       setError(requestError.response?.data?.detail || 'Unable to create account. Please try again.')
@@ -68,13 +67,9 @@ export default function Register() {
               autoComplete="email" required />
           </div>
           <div>
-            <label className="block text-gray-400 text-sm mb-1">Account role</label>
-            <select value={role} onChange={event => setRole(event.target.value)}
-              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500">
-              <option value="OPERATOR">Operator</option>
-              <option value="SECURITY_ANALYST">Security Analyst</option>
-              <option value="ADMIN">Admin</option>
-            </select>
+            <p className="text-xs leading-5 text-gray-500">
+              New accounts receive Operator access. Elevated roles must be provisioned by an administrator.
+            </p>
           </div>
           <div>
             <label className="block text-gray-400 text-sm mb-1">Password</label>

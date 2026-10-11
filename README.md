@@ -319,7 +319,7 @@ The current threshold optimizer searches candidate decision thresholds for RF-on
 4. Review feasibility and the held-out test metrics before activating. Evaluation uses a chronological 70/15/15 split: threshold selection uses the validation segment, and final metrics use the separate test segment. A run that fails its constraints cannot be activated.
 5. Use **Restore baseline** to return to the preserved `0.70` threshold / OR-fusion configuration.
 
-The optimizer evaluates the available dataset and does not change production detection while it runs. Activation is a separate, explicit action.
+The optimizer evaluates the available dataset and does not change production detection while it runs. Authorized activation applies the selected threshold and fusion strategy to new detections without changing model weights. **RF only** ignores rule violations when assigning the final detection label; **OR** combines the RF threshold with rule violations. Restore baseline to roll back.
 
 ### Frontend feature coverage
 
@@ -334,7 +334,7 @@ The sidebar links to the main user-facing backend workflows:
 * **Optimizer** — detection profiles, threshold evaluation, comparison, activation, and baseline restore.
 * **AI Assistant** — chat endpoint.
 
-Authentication is presented through the login and registration screens. Backend internals such as database models, feature processing, the rule engine, and WebSocket transport are services used by these workflows rather than standalone screens.
+Authentication is presented through the login and registration screens. Public registration creates `OPERATOR` accounts only; elevated roles must be provisioned by an administrator and cannot be selected in the registration request. Backend internals such as database models, feature processing, the rule engine, and WebSocket transport are services used by these workflows rather than standalone screens.
 
 ## Important Design Principle
 

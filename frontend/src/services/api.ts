@@ -21,6 +21,9 @@ export const register = (username: string, email: string, password: string) =>
   api.post('/auth/register', { username, email, password }).then(r => r.data)
 
 export const getCurrentUser = () => api.get('/auth/me').then(r => r.data)
+export const getUsers = () => api.get('/auth/users').then(r => r.data)
+export const updateUserRole = (id: string, role: 'ADMIN' | 'SECURITY_ANALYST' | 'OPERATOR') =>
+  api.patch(`/auth/users/${id}/role`, { role }).then(r => r.data)
 
 // System
 export const getHealth = () => api.get('/health').then(r => r.data)

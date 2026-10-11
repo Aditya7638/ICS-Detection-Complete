@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { Shield, LayoutDashboard, Radio, Bell, BarChart2, Cpu, MessageSquare, LogOut, SlidersHorizontal, ScrollText, Moon, Sun, Menu, X } from 'lucide-react'
+import { Shield, LayoutDashboard, Radio, Bell, BarChart2, Cpu, MessageSquare, LogOut, SlidersHorizontal, ScrollText, Moon, Sun, Menu, X, Users } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 
 type Theme = 'dark' | 'light'
@@ -17,6 +17,7 @@ const NAV = [
   { to: '/analytics', icon: BarChart2, label: 'Analytics' },
   { to: '/model', icon: Cpu, label: 'Model Info' },
   { to: '/optimizer', icon: SlidersHorizontal, label: 'Optimizer' },
+  { to: '/users', icon: Users, label: 'User Management', adminOnly: true },
   { to: '/chat', icon: MessageSquare, label: 'AI Assistant' },
 ]
 
@@ -58,7 +59,7 @@ export default function AppLayout() {
         </div>
 
         <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
-          {NAV.map(({ to, icon: Icon, label }) => (
+          {NAV.filter(item => !item.adminOnly || user?.role === 'ADMIN').map(({ to, icon: Icon, label }) => (
             <NavLink key={to} to={to}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${

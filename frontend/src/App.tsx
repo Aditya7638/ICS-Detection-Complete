@@ -14,6 +14,7 @@ const ModelInfo = lazy(() => import('./pages/ModelInfo'))
 const Chat = lazy(() => import('./pages/Chat'))
 const Optimizer = lazy(() => import('./pages/Optimizer'))
 const Events = lazy(() => import('./pages/Events'))
+const UserManagement = lazy(() => import('./pages/UserManagement'))
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -51,6 +52,7 @@ function AppRoutes() {
           <Route path="model" element={<ModelInfo />} />
           <Route path="chat" element={<Chat />} />
           <Route path="optimizer" element={<Optimizer />} />
+          <Route path="users" element={<UserManagement />} />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>

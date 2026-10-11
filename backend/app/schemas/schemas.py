@@ -36,6 +36,9 @@ class UserResponse(BaseModel):
     created_at: datetime
     class Config: from_attributes = True
 
+class UserRoleUpdateRequest(BaseModel):
+    role: UserRole
+
 # ── Sensor reading ─────────────────────────────────────────────────────
 class SensorReadingRequest(BaseModel):
     timestamp: Optional[datetime] = None

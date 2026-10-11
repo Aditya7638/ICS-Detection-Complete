@@ -3,6 +3,26 @@ import { Link, useNavigate } from 'react-router-dom'
 import { AlertCircle, Shield } from 'lucide-react'
 import { register } from '../services/api'
 
+interface ApiErrorShape {
+  message?: string
+  response?: { data?: { detail?: unknown } }
+}
+
+function registrationErrorMessage(error: unknown): string {
+  const apiError = error as ApiErrorShape
+  const detail = apiError.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail.map(item => {
+      if (typeof item === 'string') return item
+      if (item && typeof item === 'object' && 'msg' in item) return String(item.msg)
+      return JSON.stringify(item)
+    }).join(' ')
+  }
+  if (!apiError.response) return 'Unable to reach the server. Check that the backend is running and try again.'
+  return apiError.message || 'Unable to create account. Please try again.'
+}
+
 export default function Register() {
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
@@ -29,8 +49,8 @@ export default function Register() {
     try {
       await register(username, email, password)
       navigate('/login?registered=1')
-    } catch (requestError: any) {
-      setError(requestError.response?.data?.detail || 'Unable to create account. Please try again.')
+    } catch (requestError) {
+      setError(registrationErrorMessage(requestError))
     } finally {
       setLoading(false)
     }

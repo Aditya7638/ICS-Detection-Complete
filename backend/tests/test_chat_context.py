@@ -1,12 +1,14 @@
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.routes.chat import (
     SYSTEM_PROMPT,
+    _call_llm,
     _build_context,
     _build_event_context,
     _build_llm_messages,
@@ -196,6 +198,25 @@ class ChatContextTests(unittest.TestCase):
         self.assertEqual(messages[0]["role"], "system")
         self.assertIn('"LIT101": 987.5', messages[0]["content"])
         self.assertEqual(messages[1:], history)
+
+    def test_llm_request_uses_low_variability_and_detection_format_guidance(self):
+        provider_response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="Concise answer."))]
+        )
+        with (
+            patch("app.api.routes.chat.settings.LLM_API_KEY", "test-key"),
+            patch("app.api.routes.chat.settings.LLM_PROVIDER", "groq"),
+            patch("app.api.routes.chat.settings.LLM_MODEL", "test-model"),
+            patch("groq.Groq") as groq_client,
+        ):
+            groq_client.return_value.chat.completions.create.return_value = provider_response
+
+            reply = _call_llm([{"role": "user", "content": "Explain this event."}], None)
+
+        self.assertEqual(reply, "Concise answer.")
+        request = groq_client.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["temperature"], 0)
+        self.assertIn("always use the five required headings", request["messages"][0]["content"])
 
 
 if __name__ == "__main__":

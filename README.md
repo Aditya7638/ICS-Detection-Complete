@@ -334,7 +334,7 @@ The sidebar links to the main user-facing backend workflows:
 * **Optimizer** — detection profiles, threshold evaluation, comparison, activation, and baseline restore.
 * **AI Assistant** — chat endpoint.
 
-Authentication is presented through the login and registration screens. Public registration creates `OPERATOR` accounts only; elevated roles must be provisioned by an administrator and cannot be selected in the registration request. Backend internals such as database models, feature processing, the rule engine, and WebSocket transport are services used by these workflows rather than standalone screens.
+Authentication is presented through the login and registration screens. Public registration creates `OPERATOR` accounts only; elevated roles cannot be selected at registration. An existing `ADMIN` can use **User Management** to assign account roles after registration. Users cannot promote themselves, an administrator cannot change their own role, and the final active administrator cannot be demoted. Role changes are recorded in the audit log. Backend internals such as database models, feature processing, the rule engine, and WebSocket transport are services used by these workflows rather than standalone screens.
 
 ## Important Design Principle
 

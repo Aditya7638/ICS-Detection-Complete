@@ -3,6 +3,27 @@ import { useAuth } from '../hooks/useAuth.ts'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Shield, AlertCircle } from 'lucide-react'
 
+interface ApiErrorShape {
+  message?: string
+  response?: { status?: number; data?: { detail?: unknown } }
+}
+
+function loginErrorMessage(error: unknown): string {
+  const apiError = error as ApiErrorShape
+  const detail = apiError.response?.data?.detail
+  if (apiError.response?.status === 401) return 'Invalid username or password.'
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail.map(item => {
+      if (typeof item === 'string') return item
+      if (item && typeof item === 'object' && 'msg' in item) return String(item.msg)
+      return JSON.stringify(item)
+    }).join(' ')
+  }
+  if (!apiError.response) return 'Unable to reach the server. Check that the backend is running and try again.'
+  return apiError.message || 'Unable to sign in. Please try again.'
+}
+
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
@@ -20,8 +41,8 @@ export default function Login() {
     try {
       await login(username, password)
       navigate('/dashboard')
-    } catch {
-      setError('Invalid username or password.')
+    } catch (requestError) {
+      setError(loginErrorMessage(requestError))
     } finally {
       setLoading(false)
     }

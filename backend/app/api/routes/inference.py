@@ -7,7 +7,9 @@ import io, json, pandas as pd, uuid
 from app.db.session import get_db
 from app.db.models import User, SensorReading, Prediction, Alarm
 from app.auth.security import any_authenticated
-from app.schemas.schemas import DetectionResponse, CSVUploadResponse, CSVRowResult, ValidationIssueOut, RuleViolationOut
+from app.schemas.schemas import (DetectionResponse, CSVUploadResponse, CSVRowResult,
+                                   ValidationIssueOut, RuleViolationOut,
+                                   LocalizationOut, AttackTypeAssessmentOut)
 from app.detection.validator import validate_sensor_row, normalize_csv_headers, extract_sensor_row
 from app.detection.detection_service import build_data_fingerprint, detect
 from app.services.alarm_service import maybe_create_alarm
@@ -20,6 +22,18 @@ SEV_MAP = {"LOW": "LOW", "MEDIUM": "MEDIUM", "HIGH": "HIGH", "CRITICAL": "CRITIC
 CSV_BATCH_SIZE = 5
 
 def _build_detection_response(result) -> DetectionResponse:
+    loc = None
+    if result.localization:
+        try:
+            loc = LocalizationOut(**result.localization)
+        except Exception:
+            loc = None
+    at = None
+    if result.attack_type_assessment:
+        try:
+            at = AttackTypeAssessmentOut(**result.attack_type_assessment)
+        except Exception:
+            at = None
     return DetectionResponse(
         event_id=result.event_id,
         timestamp=result.timestamp,
@@ -28,6 +42,7 @@ def _build_detection_response(result) -> DetectionResponse:
         ml_prediction=result.ml_prediction,
         ml_probability=result.ml_probability,
         ml_label=result.ml_label,
+        threshold_used=result.threshold_used,
         rule_violated=result.rule_violated,
         rule_violation_count=result.rule_violation_count,
         rule_violations=[RuleViolationOut(**v) for v in result.rule_violations],
@@ -36,6 +51,12 @@ def _build_detection_response(result) -> DetectionResponse:
         affected_sensors=result.affected_sensors,
         explanation=result.explanation,
         recommendations=result.recommendations,
+        risk_score=getattr(result, "risk_score", None),
+        risk_severity=getattr(result, "risk_severity", None),
+        localization=loc,
+        attack_type_assessment=at,
+        active_config_version=getattr(result, "active_config_version", None),
+        active_config_id=getattr(result, "active_config_id", None),
         processing_ms=result.processing_ms,
     )
 
@@ -59,6 +80,16 @@ def _persist_result(result, sensor_data: dict, source: str, db: Session, user_id
         final_label=result.final_label, severity=result.severity,
         rule_violations=result.rule_violations, affected_sensors=result.affected_sensors,
         recommendations=result.recommendations, explanation=result.explanation,
+        detection_context={
+            "threshold_used": result.threshold_used,
+            "risk_score": result.risk_score,
+            "risk_severity": result.risk_severity,
+            "localization": result.localization,
+            "attack_type_assessment": result.attack_type_assessment,
+            "active_config_id": result.active_config_id,
+            "active_config_version": result.active_config_version,
+            "asset_criticalities": result.asset_criticalities,
+        },
         processing_ms=result.processing_ms,
     )
     db.add(pred)

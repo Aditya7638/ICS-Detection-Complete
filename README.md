@@ -309,18 +309,32 @@ Natural-language requirements
   Validated Company Profile
 ```
 
-The optimizer can search over parameters such as:
+The current threshold optimizer searches candidate decision thresholds for RF-only and RF-plus-rules OR fusion. It applies configured minimum-recall, maximum-FPR, and minimum-precision bounds and ranks feasible candidates according to the selected profile. It does not retrain the model or optimize rule priorities, risk weights, latency, or critical-asset-specific thresholds.
 
-* Detection threshold
-* ML weight
-* Rule weight
-* Fusion strategy
-* Rule priorities
-* Operational sensor criticality
+### Using the frontend optimizer
 
-Hard requirements such as maximum FPR, minimum recall, or maximum latency should be treated as constraints.
+1. Sign in as a `SECURITY_ANALYST` or `ADMIN` and open **Optimizer** in the sidebar. Other signed-in roles can view profiles and completed results but cannot change production configuration.
+2. Create a profile, choose an objective (`BALANCED`, `HIGH_RECALL`, `LOW_FP`, or `CRITICAL_ASSET`), and optionally enter metric bounds as percentages.
+3. Select the new profile, set the threshold range and step, and run the search. The default evaluation dataset is `data/NewTestData.csv`, falling back to `data/ne_data.csv`; provide a project-root-relative path to use a different labeled CSV. The CSV needs the model's sensor columns and a `Normal/Attack` label column.
+4. Review feasibility and the held-out test metrics before activating. Evaluation uses a chronological 70/15/15 split: threshold selection uses the validation segment, and final metrics use the separate test segment. A run that fails its constraints cannot be activated.
+5. Use **Restore baseline** to return to the preserved `0.70` threshold / OR-fusion configuration.
 
-If no configuration satisfies all hard constraints, the system should report the requirement as infeasible rather than producing an invalid configuration.
+The optimizer evaluates the available dataset and does not change production detection while it runs. Activation is a separate, explicit action.
+
+### Frontend feature coverage
+
+The sidebar links to the main user-facing backend workflows:
+
+* **Dashboard** — system health, detection overview, and active profile.
+* **Live Monitor** — WebSocket detections, simulator controls, and CSV inference.
+* **Event History** — filtered saved events, sensor/rule search, and event evidence.
+* **Alarms** — acknowledge and resolve actions.
+* **Analytics** — detection and alarm summaries.
+* **Model Info** — model metadata and features.
+* **Optimizer** — detection profiles, threshold evaluation, comparison, activation, and baseline restore.
+* **AI Assistant** — chat endpoint.
+
+Authentication is presented through the login and registration screens. Backend internals such as database models, feature processing, the rule engine, and WebSocket transport are services used by these workflows rather than standalone screens.
 
 ## Important Design Principle
 

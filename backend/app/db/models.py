@@ -1,5 +1,5 @@
 from sqlalchemy import (Column, String, Float, Boolean, Integer,
-                         DateTime, ForeignKey, Text, JSON)
+                         DateTime, ForeignKey, Text, JSON, UniqueConstraint)
 from sqlalchemy.orm import relationship, DeclarativeBase
 from datetime import datetime, timezone
 import uuid, enum
@@ -70,6 +70,7 @@ class Prediction(Base):
     affected_sensors = Column(JSON, default=list)
     recommendations = Column(JSON, default=list)
     explanation = Column(Text)
+    detection_context = Column(JSON, nullable=True)
     processing_ms = Column(Float)
     reading = relationship("SensorReading", back_populates="prediction")
     alarm = relationship("Alarm", back_populates="prediction", uselist=False)
@@ -117,3 +118,92 @@ class ChatMessage(Base):
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=now_utc)
     session = relationship("ChatSession", back_populates="messages")
+
+
+# ── Risk-Aware Detection Config ───────────────────────────────────────
+
+class DetectionConfig(Base):
+    """Stores an operator-defined requirement profile and its resolved configuration."""
+    __tablename__ = "detection_configs"
+    id = Column(String, primary_key=True, default=new_uuid)
+    version = Column(Integer, nullable=False, default=1)
+    name = Column(String(128), nullable=False)
+    # Profile: HIGH_RECALL | LOW_FP | CRITICAL_ASSET | BALANCED
+    profile = Column(String(32), nullable=False)
+    # Requirement constraints
+    min_recall = Column(Float, nullable=True)
+    max_fpr = Column(Float, nullable=True)
+    min_precision = Column(Float, nullable=True)
+    # Balanced profile weights (sum to 1.0)
+    weight_precision = Column(Float, default=0.33)
+    weight_recall = Column(Float, default=0.34)
+    weight_fpr = Column(Float, default=0.33)
+    # Resolved configuration
+    threshold = Column(Float, nullable=True)          # resolved threshold (None = not yet optimized)
+    fusion_strategy = Column(String(32), default="OR")  # OR | RISK_SCORE
+    # Risk-score fusion weights (only used when fusion_strategy=RISK_SCORE)
+    risk_weight_ml = Column(Float, default=0.50)
+    risk_weight_rules = Column(Float, default=0.35)
+    risk_weight_asset = Column(Float, default=0.15)
+    # Status
+    is_active = Column(Boolean, default=False)        # is this the current production config?
+    is_baseline = Column(Boolean, default=False)      # is this the preserved baseline?
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=now_utc)
+    updated_at = Column(DateTime, default=now_utc, onupdate=now_utc)
+    # Optimization outcome summary (JSON)
+    optimization_outcome = Column(JSON, default=dict)
+    # Relationships
+    critical_assets = relationship("CriticalAsset", back_populates="config", cascade="all, delete-orphan")
+    optimization_results = relationship("OptimizationResult", back_populates="config", cascade="all, delete-orphan")
+    creator = relationship("User", foreign_keys=[created_by])
+
+
+class CriticalAsset(Base):
+    """Operator-designated critical process assets linked to a detection config."""
+    __tablename__ = "critical_assets"
+    id = Column(String, primary_key=True, default=new_uuid)
+    config_id = Column(String, ForeignKey("detection_configs.id"), nullable=False, index=True)
+    asset_tag = Column(String(32), nullable=False)     # e.g., "LIT101", "P302"
+    # LOW | MEDIUM | HIGH | CRITICAL
+    criticality_level = Column(String(16), nullable=False, default="MEDIUM")
+    description = Column(Text, nullable=True)
+    config = relationship("DetectionConfig", back_populates="critical_assets")
+
+
+class OptimizationResult(Base):
+    """Records a threshold-sweep evaluation run for a given config."""
+    __tablename__ = "optimization_results"
+    id = Column(String, primary_key=True, default=new_uuid)
+    config_id = Column(String, ForeignKey("detection_configs.id"), nullable=False, index=True)
+    run_at = Column(DateTime, default=now_utc, index=True)
+    dataset_path = Column(String(256), nullable=True)
+    n_val = Column(Integer, nullable=True)             # validation set size
+    n_test = Column(Integer, nullable=True)            # test set size
+    val_metrics = Column(JSON, default=dict)           # {threshold: metrics} on val set
+    test_metrics = Column(JSON, default=dict)          # final metrics on held-out test period
+    threshold_sweep = Column(JSON, default=list)       # [{threshold, precision, recall, f1, fpr, fnr}]
+    selected_threshold = Column(Float, nullable=True)
+    selected_fusion = Column(String(32), nullable=True)
+    constraints_satisfied = Column(Boolean, nullable=True)
+    infeasible_reason = Column(Text, nullable=True)
+    alternatives = Column(JSON, default=list)          # best alternatives when infeasible
+    run_by = Column(String, ForeignKey("users.id"), nullable=True)
+    config = relationship("DetectionConfig", back_populates="optimization_results")
+    runner = relationship("User", foreign_keys=[run_by])
+
+    @property
+    def sweep_results(self):
+        return self.threshold_sweep
+
+    @property
+    def baseline_val_metrics(self):
+        return (self.val_metrics or {}).get("baseline")
+
+    @property
+    def baseline_test_metrics(self):
+        return (self.test_metrics or {}).get("baseline")
+
+    @property
+    def methodology_note(self):
+        return (self.val_metrics or {}).get("methodology")

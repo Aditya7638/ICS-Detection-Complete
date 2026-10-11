@@ -86,6 +86,16 @@ async def _replay_loop(path: str, speed: float, user_id: str):
                                   final_label=result.final_label, severity=result.severity,
                                   rule_violations=result.rule_violations, affected_sensors=result.affected_sensors,
                                   recommendations=result.recommendations, explanation=result.explanation,
+                                  detection_context={
+                                      "threshold_used": result.threshold_used,
+                                      "risk_score": result.risk_score,
+                                      "risk_severity": result.risk_severity,
+                                      "localization": result.localization,
+                                      "attack_type_assessment": result.attack_type_assessment,
+                                      "active_config_id": result.active_config_id,
+                                      "active_config_version": result.active_config_version,
+                                      "asset_criticalities": result.asset_criticalities,
+                                  },
                                   processing_ms=result.processing_ms)
                 db.add(pred)
                 db.flush()
@@ -98,8 +108,15 @@ async def _replay_loop(path: str, speed: float, user_id: str):
                     "timestamp": result.timestamp.isoformat(),
                     "final_label": result.final_label,
                     "ml_probability": result.ml_probability,
+                    "threshold_used": result.threshold_used,
                     "severity": result.severity,
                     "rule_violation_count": result.rule_violation_count,
+                    "risk_score": result.risk_score,
+                    "risk_severity": result.risk_severity,
+                    "localization": result.localization,
+                    "attack_type_assessment": result.attack_type_assessment,
+                    "active_config_id": result.active_config_id,
+                    "active_config_version": result.active_config_version,
                     "affected_sensors": result.affected_sensors,
                     "rule_violations": result.rule_violations,
                     "recommendations": result.recommendations,

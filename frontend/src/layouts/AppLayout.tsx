@@ -1,13 +1,15 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { Shield, LayoutDashboard, Radio, Bell, BarChart2, Cpu, MessageSquare, LogOut, Activity } from 'lucide-react'
+import { Shield, LayoutDashboard, Radio, Bell, BarChart2, Cpu, MessageSquare, LogOut, SlidersHorizontal, ScrollText } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 
 const NAV = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/live', icon: Radio, label: 'Live Monitor' },
+  { to: '/events', icon: ScrollText, label: 'Event History' },
   { to: '/alarms', icon: Bell, label: 'Alarms' },
   { to: '/analytics', icon: BarChart2, label: 'Analytics' },
   { to: '/model', icon: Cpu, label: 'Model Info' },
+  { to: '/optimizer', icon: SlidersHorizontal, label: 'Optimizer' },
   { to: '/chat', icon: MessageSquare, label: 'AI Assistant' },
 ]
 

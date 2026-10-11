@@ -9,6 +9,8 @@ import Alarms from './pages/Alarms'
 import Analytics from './pages/Analytics'
 import ModelInfo from './pages/ModelInfo'
 import Chat from './pages/Chat'
+import Optimizer from './pages/Optimizer'
+import Events from './pages/Events'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -27,10 +29,12 @@ function AppRoutes() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="live" element={<Live />} />
+        <Route path="events" element={<Events />} />
         <Route path="alarms" element={<Alarms />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="model" element={<ModelInfo />} />
         <Route path="chat" element={<Chat />} />
+        <Route path="optimizer" element={<Optimizer />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

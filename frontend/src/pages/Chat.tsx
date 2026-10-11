@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { sendChat } from '../services/api'
-import { MessageSquare, Send, Bot, User, AlertCircle, RotateCw, Trash2, Sparkles } from 'lucide-react'
+import {
+  Send, Bot, User, AlertCircle, RotateCw, Trash2, Sparkles,
+  Activity, SearchCheck, ClipboardList, ShieldQuestion, CircleHelp, AlertTriangle,
+} from 'lucide-react'
 
 interface Message { role: 'user' | 'assistant'; content: string }
+type DetectionContext = Record<string, unknown>
 
 const SUGGESTIONS = [
   'Why was the last detection classified as an attack?',
@@ -21,16 +25,67 @@ const FOLLOW_UPS = [
 
 const WELCOME_MESSAGE = 'Hello! I am the ICS Security Assistant. I can help you investigate detections, understand rule violations, and recommend next steps. What would you like to know?\n\nSafety notice: I am an advisory tool only. I cannot and will not control any ICS equipment, PLCs, or actuators.'
 
-function AssistantContent({ content }: { content: string }) {
+const SECTION_ICONS = [Activity, SearchCheck, ClipboardList, AlertTriangle, ShieldQuestion]
+const SECTION_COLORS = [
+  'border-cyan-800/70 bg-cyan-950/20',
+  'border-amber-800/60 bg-amber-950/15',
+  'border-sky-900/70 bg-sky-950/15',
+  'border-emerald-900/70 bg-emerald-950/15',
+  'border-violet-900/70 bg-violet-950/15',
+]
+
+function parseSections(content: string): { title: string; body: string }[] {
+  const sections: { title: string; body: string[] }[] = []
+  for (const line of content.split('\n')) {
+    const heading = line.trim().replace(/^#{1,4}\s*/, '').replace(/\*/g, '').replace(/:$/, '')
+      .match(/^[1-5]\.\s*(Incident Summary|Suspected Problem|Evidence|Recommended Next Steps|Confidence\s*&\s*Limitations)$/i)
+    if (heading) sections.push({ title: heading[1], body: [] })
+    else if (sections.length) sections[sections.length - 1].body.push(line)
+  }
+  return sections.length === 5
+    ? sections.map(section => ({ title: section.title, body: section.body.join('\n').trim() }))
+    : []
+}
+
+function MessageLines({ content }: { content: string }) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {content.split('\n').map((line, index) => {
         const trimmed = line.trim()
-        if (!trimmed) return <div key={index} className="h-1" />
-        if (trimmed.startsWith('## ')) return <h3 key={index} className="text-cyan-300 font-semibold mt-2">{trimmed.slice(3)}</h3>
-        if (/^[-*]\s/.test(trimmed)) return <div key={index} className="flex gap-2 pl-2"><span className="text-cyan-400">•</span><span>{trimmed.slice(2)}</span></div>
-        if (/^\d+\.\s/.test(trimmed)) return <div key={index} className="flex gap-2 pl-2"><span className="text-cyan-400 font-medium">{trimmed.match(/^\d+/)?.[0]}.</span><span>{trimmed.replace(/^\d+\.\s/, '')}</span></div>
+        if (!trimmed) return null
+        if (/^[-*]\s/.test(trimmed)) return (
+          <div key={index} className="flex gap-2 pl-1"><span className="text-cyan-400">•</span><span>{trimmed.slice(2).replace(/\*\*/g, '')}</span></div>
+        )
+        if (/^\d+\.\s/.test(trimmed)) return (
+          <div key={index} className="flex gap-2 pl-1"><span className="font-semibold text-cyan-300">{trimmed.match(/^\d+/)?.[0]}.</span><span>{trimmed.replace(/^\d+\.\s/, '').replace(/\*\*/g, '')}</span></div>
+        )
         return <p key={index}>{trimmed.replace(/\*\*/g, '')}</p>
+      })}
+    </div>
+  )
+}
+
+function AssistantContent({ content }: { content: string }) {
+  const sections = parseSections(content)
+  if (!sections.length) return <MessageLines content={content} />
+
+  return (
+    <div className="space-y-2.5">
+      {sections.map((section, index) => {
+        const Icon = SECTION_ICONS[index] ?? CircleHelp
+        const severity = index === 0 ? section.body.match(/severity:\s*(CRITICAL|HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() : undefined
+        const severityColor = severity === 'CRITICAL' || severity === 'HIGH' ? 'text-red-300 border-red-800 bg-red-950/50'
+          : severity === 'MEDIUM' ? 'text-amber-300 border-amber-800 bg-amber-950/40'
+            : 'text-blue-300 border-blue-800 bg-blue-950/40'
+        return (
+          <section key={section.title} className={`rounded-xl border px-3 py-2.5 ${SECTION_COLORS[index]}`}>
+            <h3 className="mb-1.5 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-200">
+              <Icon size={14} className="text-cyan-300" /> {section.title}
+              {severity && <span className={`rounded-full border px-2 py-0.5 text-[10px] ${severityColor}`}>{severity}</span>}
+            </h3>
+            <div className="text-[13px] leading-5 text-gray-300"><MessageLines content={section.body} /></div>
+          </section>
+        )
       })}
     </div>
   )
@@ -38,27 +93,27 @@ function AssistantContent({ content }: { content: string }) {
 
 export default function Chat() {
   const location = useLocation()
+  const initialDetection = (location.state as { detection?: DetectionContext } | null)?.detection
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: WELCOME_MESSAGE }
   ])
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(initialDetection
+    ? 'Investigate this selected detection using the recorded evidence.'
+    : '')
   const [sessionId, setSessionId] = useState<string | undefined>()
   const [loading, setLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [lastRequest, setLastRequest] = useState('')
-  const [detectionContext, setDetectionContext] = useState<object | undefined>()
+  const [detectionContext, setDetectionContext] = useState<DetectionContext | undefined>(initialDetection)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   useEffect(() => {
-    const detection = (location.state as { detection?: object } | null)?.detection
-    if (detection) {
-      setDetectionContext(detection)
-      setInput('Please analyze this detection and explain the attack type, evidence, and recommended investigation steps.')
+    if (initialDetection) {
       window.history.replaceState({}, document.title, window.location.pathname)
     }
-  }, [location.state])
+  }, [initialDetection, location.key])
 
   const send = async (text?: string) => {
     const msg = text || input.trim()
@@ -113,7 +168,14 @@ export default function Chat() {
         {detectionContext && (
           <div className="px-5 py-3 border-b border-cyan-900/60 bg-cyan-950/20 flex items-center gap-3">
             <div className="h-7 w-7 rounded-lg bg-cyan-900/70 flex items-center justify-center"><Sparkles size={14} className="text-cyan-300" /></div>
-            <div className="min-w-0"><p className="text-xs font-medium text-cyan-200">Detection context attached</p><p className="text-xs text-gray-500 truncate">The assistant can reference the selected event and its evidence.</p></div>
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-cyan-200">Selected event attached</p>
+              <p className="truncate text-xs text-gray-500">
+                ID {String(detectionContext.event_id ?? detectionContext.id ?? 'Unavailable')}
+                {' · '}{String(detectionContext.final_label ?? 'Detection status unavailable')}
+                {' · '}{String(detectionContext.severity ?? 'Severity unavailable')}
+              </p>
+            </div>
           </div>
         )}
         {/* Messages */}
@@ -123,7 +185,7 @@ export default function Chat() {
               <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 border ${m.role === 'assistant' ? 'bg-cyan-950 border-cyan-800' : 'bg-gray-800 border-gray-700'}`}>
                 {m.role === 'assistant' ? <Bot size={14} className="text-cyan-400" /> : <User size={14} className="text-gray-300" />}
               </div>
-              <div className={`max-w-3xl rounded-2xl px-4 py-3 text-sm leading-6 border ${
+              <div className={`${m.role === 'assistant' ? 'w-full max-w-4xl' : 'max-w-3xl'} rounded-2xl px-4 py-3 text-sm leading-6 border ${
                 m.role === 'assistant' ? 'bg-gray-800/90 border-gray-700 text-gray-200 rounded-bl-md' : 'bg-cyan-900/40 border-cyan-800/70 text-white rounded-br-md'
               }`}>
                 {m.role === 'assistant' ? <AssistantContent content={m.content} /> : m.content}
@@ -162,7 +224,7 @@ export default function Chat() {
 
         {detectionContext && !loading && messages.length > 1 && (
           <div className="px-4 pb-3">
-            <div className="flex items-center gap-2 text-xs text-cyan-300 mb-2"><Sparkles size={13} /> Detection context is active</div>
+            <div className="mb-2 flex items-center gap-2 text-xs text-cyan-300"><Sparkles size={13} /> Follow up on the selected event</div>
             <div className="flex flex-wrap gap-2">
             {FOLLOW_UPS.map(question => (
               <button key={question} onClick={() => send(question)}

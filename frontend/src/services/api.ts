@@ -120,4 +120,70 @@ export const stopSimulator = () => api.post('/simulator/stop').then(r => r.data)
 export const pauseSimulator = () => api.post('/simulator/pause').then(r => r.data)
 export const getSimulatorStatus = () => api.get('/simulator/status').then(r => r.data)
 
+// ── Detection Configuration (Requirement Profiles) ─────────────────────────
+export const listConfigs = () => api.get('/config').then(r => r.data)
+export const getConfig = (id: string) => api.get(`/config/${id}`).then(r => r.data)
+export const getActiveConfigInfo = () => api.get('/config/active-info').then(r => r.data)
+
+export const createConfig = (data: {
+  name: string
+  profile: string
+  min_recall?: number
+  max_fpr?: number
+  min_precision?: number
+  weight_precision?: number
+  weight_recall?: number
+  weight_fpr?: number
+  fusion_strategy?: string
+  risk_weight_ml?: number
+  risk_weight_rules?: number
+  risk_weight_asset?: number
+  critical_assets?: { asset_tag: string; criticality_level: string; description?: string }[]
+}) => api.post('/config', data).then(r => r.data)
+
+export const activateConfig = (id: string, notes?: string) =>
+  api.post(`/config/${id}/activate`, { config_id: id, notes }).then(r => r.data)
+
+export const restoreBaseline = () =>
+  api.post('/config/restore-baseline').then(r => r.data)
+
+export const deleteConfig = (id: string) =>
+  api.delete(`/config/${id}`).then(r => r.data)
+
+// ── Threshold Optimizer ────────────────────────────────────────────────────
+export const runOptimization = (data: {
+  config_id: string
+  dataset_path?: string
+  threshold_range_min?: number
+  threshold_range_max?: number
+  threshold_step?: number
+}) => api.post('/optimizer/run', data).then(r => r.data)
+
+export const getOptimizationResults = (configId: string) =>
+  api.get(`/optimizer/results/${configId}`).then(r => r.data)
+
+export const getOptimizationRun = (runId: string) =>
+  api.get(`/optimizer/results/run/${runId}`).then(r => r.data)
+
+export const getBaselineComparison = () =>
+  api.get('/optimizer/evaluate/baseline-comparison').then(r => r.data)
+
+// ── Events ─────────────────────────────────────────────────────────────────
+export const listEvents = (params?: {
+  final_label?: string
+  severity?: string
+  start_time?: string
+  end_time?: string
+  affected_sensor?: string
+  rule_id?: string
+  limit?: number
+  offset?: number
+}) => api.get('/events', { params }).then(r => r.data)
+
+export const getEvent = (id: string) =>
+  api.get(`/events/${id}`).then(r => r.data)
+
+export const getRiskDistribution = () =>
+  api.get('/events/stats/risk').then(r => r.data)
+
 export default api
